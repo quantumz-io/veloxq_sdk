@@ -1,0 +1,60 @@
+[project]
+name = "veloxq_sdk"
+description = ""
+requires-python = ">=3.8"
+authors = [
+    {name="Hendrik D Louzada", email="hendriklouzada@qmz.ai"}
+]
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dynamic = ["version"]
+dependencies = [
+    "traitlets>=5.0.0",
+    "httpx>=0.28.0",
+    "websockets>=13.0.0",
+    "yarl>=1.15.0",
+    "h5py>=3.11.0"
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[project.scripts]
+spam-cli = "spam:main_cli"
+
+[tool.setuptools.dynamic]
+version = {attr = "veloxq_sdk.__version__"}
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.ruff]
+target-version = "py38"
+select = ["ALL"]
+ignore = [
+    "FURB122"  # Allow IOBase.write in a for loop.
+]
+line-length = 88
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = false
