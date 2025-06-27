@@ -37,15 +37,15 @@ class InstanceDict(t.TypedDict):
     """A dictionary type for Ising-model instances.
 
     Attributes:
-        biases (BiasesType): A list or NumPy array of float values 
+        h (BiasesType): A list or NumPy array of float values 
             representing the bias terms in an Ising model.
-        coupling (CouplingType): A nested list or NumPy array of float values
+        J (CouplingType): A nested list or NumPy array of float values
             representing the coupling terms in an Ising model.
 
     """
 
-    biases: BiasesType
-    coupling: CouplingType
+    h: BiasesType
+    J: CouplingType
 
 
 class Problem(BaseModel):

@@ -54,16 +54,20 @@ The VeloxQ client uses a global singleton configuration (via the `VeloxQAPIConfi
 
 Since `VeloxQAPIConfig` is a **singleton**, the entire Python process shares one configuration (URL, token, etc.). If you need multiple independent configurations, you should spawn multiple processes and configure each process individually.
 
+> The only configuration variable not set by default is the **token**. It **must be configured** for authentication on the VeloxQ API platform.
+
 
 ### 2.1 Environment Variables
 
-Environment variables allow you to override configuration on the fly. They must use an uppercased prefix. By default, the prefix is derived from the client name: `VELOXQ_API_SDK`.
+Environment variables allow you to override configuration for the session. There are currently two variables:
+
+- `VELOX_TOKEN`: Updates the token authentication.
+- `VELOXQ_API_URL`: Updates the base url used to connect to the API.
 
 Example usage:
 
 ```shell
-export VELOXQ_API_SDK__token="12345678-90ab-cdef-1234-567890abcdef"
-export VELOXQ_API_SDK__url="https://api.veloxq.com"
+export VELOX_TOKEN="12345678-90ab-cdef-1234-567890abcdef"
 ```
 
 When your Python code runs, these variables are automatically loaded. Therefore, this configuration is use as base and extra configuration will be merged on top.
@@ -236,8 +240,8 @@ Below are common flows for creating a File:
 2. From a dictionary (e.g., small Ising-model biases/couplings):
    ```python
    instance_data = {
-       "biases": [1, -1],
-       "coupling": [
+       "h": [1, -1],
+       "J": [
            [0, -1],
            [-1, 0]
        ]
@@ -364,8 +368,8 @@ Submitting a problem defined in memory:
 solver = VeloxQSolver()
 
 instance_data = {
-  "biases": [1, -1],
-  "coupling": [[0, -1], [-1, 0]]
+  "h": [1, -1],
+  "J": [[0, -1], [-1, 0]]
 }
 
 result = solver.sample(instance_data)  # returns JobResult object
