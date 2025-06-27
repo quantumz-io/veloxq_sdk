@@ -6,17 +6,19 @@ from veloxq_sdk.api.backends import (
     VeloxQH100_1,
     VeloxQH100_2,
 )
+from veloxq_sdk.api.jobs import Job
 from veloxq_sdk.api.problems import File, Problem
 from veloxq_sdk.api.solvers import (
-    VeloxQSolver,
     VeloxQParameters,
+    VeloxQSolver,
 )
 
 __all__ = [
     'File',
+    'Job',
     'Problem',
-    'VeloxQSolver',
     'VeloxQH100_1',
     'VeloxQH100_2',
     'VeloxQParameters',
+    'VeloxQSolver',
 ]
