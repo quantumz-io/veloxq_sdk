@@ -98,7 +98,7 @@ class JobLogsRow(BasePydanticModel):
     message: str
 
     def __str__(self) -> str:
-        return f'{self.timestamp} [{self.category.value}] {self.message}'
+        return f'{self.timestamp} [{self.category}] {self.message}'
 
 
 class Job(BaseModel):
