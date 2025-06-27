@@ -218,16 +218,15 @@ A Problem groups related files and can be created or retrieved by name:
 Files are where your actual data is stored. You can create them from several input types.  
 Once a file is created and uploaded, it remains on the VeloxQ platform until deleted.
 
-> NOTE: By default, if a file with the same name (within the same problem) already exists, the SDK will return that existing file unless you set "force=True" to overwrite it.  
+> **NOTE:** By default, if a file with the same name (within the same problem) already exists, the SDK will return that existing file unless you set `force=True` to overwrite it.
 
-Below are common flows for creating a File:
+Below are common flows for creating a `File`:
 
-1. From a local file path:  
-   Useful if you have an existing file in your filesystem (e.g., ".h5," ".csv," ".txt," etc.).
+1. **From a local file path:**  
+   Useful if you have an existing file in your filesystem (e.g., `.h5`, `.csv`, `.txt`, etc.).
 
    ```python
    from veloxq_sdk import File
-   
    # Suppose "my_problem" is a Problem instance
    file_obj = File.from_instance(
        "path/to/local_data.h5",
@@ -236,21 +235,26 @@ Below are common flows for creating a File:
        force=True                # Overwrite if a file with the same name exists
    )
    ```
-   
-2. From a dictionary (e.g., small Ising-model biases/couplings):
+
+2. **From a dictionary of biases and couplings:**  
+   Create a `File` directly from biases and couplings defined as dictionaries. This is especially useful for sparse Ising models.
+
    ```python
-   instance_data = {
-       "h": [1, -1],
-       "J": [
-           [0, -1],
-           [-1, 0]
-       ]
-   }
-   file_obj = File.from_instance(instance_data)  # name is generated from a hash
+   biases = {0: 1.0, 2: -1.0}  # Variable indices mapped to bias values
+   couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to coupling values
+
+   file_obj = File.from_instance((biases, couplings), name="sparse_ising.h5")
+   ```
+   Or using keyword arguments:
+   ```python
+   file_obj = File.from_instance(biases=biases, couplings=couplings, name="sparse_ising.h5")
    ```
    This internally generates a temporary HDF5 file and uploads it.
 
-3. From a tuple (biases, couplings):
+3. **From biases and couplings:**
+   You can create a `File` directly from `biases` and `couplings`. These can be provided as lists, NumPy arrays, or dictionaries.
+
+   **Example using lists:**
    ```python
    biases = [1, 0, -2]
    couplings = [
@@ -260,13 +264,47 @@ Below are common flows for creating a File:
    ]
    file_obj = File.from_instance((biases, couplings))
    ```
+   **Example using NumPy arrays:**
+   ```python
+   import numpy as np
 
-4. From direct I/O stream (in-memory data):
+   biases = np.array([1, 0, -2])
+   couplings = np.array([
+       [0,  1,  0],
+       [1,  0, -1],
+       [0, -1,  0]
+   ])
+   file_obj = File.from_instance((biases, couplings))
+   ```
+   **Example using dictionaries (sparse data):**
+   ```python
+   biases = {0: 1.0, 2: -2.0}
+   couplings = {(0, 1): 1.0, (2, 1): -1.0}
+   file_obj = File.from_instance((biases, couplings))
+   ```
+   Or using keyword arguments:
+   ```python
+   file_obj = File.from_instance(biases=biases, couplings=couplings)
+   ```
+   This internally generates a temporary HDF5 file and uploads it.
+
+   > **Note:**  
+   > Accepted types for `biases` include:
+   > - List of floats
+   > - NumPy 1D arrays
+   > - Dictionaries mapping variable indices to floats
+   >
+   > Accepted types for `couplings` include:
+   > - List of lists (2D array) of floats
+   > - NumPy 2D arrays
+   > - Dictionaries mapping tuples of variable indices to floats
+
+4. **From direct I/O stream (in-memory data):**
    ```python
    import io
 
    # Suppose 'buffer' is a BytesIO object containing HDF5 or CSV data
-   buffer = io.BytesIO(b"...")  
+   buffer = io.BytesIO(b"...")
    file_obj = File.from_io(
        data=buffer,
        name="uploaded_data.h5",  # Will automatically append .h5 if omitted
@@ -274,8 +312,8 @@ Below are common flows for creating a File:
    )
    ```
 
-5. Using an existing File object:
-   If you have already created/retrieved a File object, simply pass it directly:
+5. **Using an existing File object:**  
+   If you have already created/retrieved a `File` object, simply pass it directly:
    ```python
    existing_file_obj = File.get_files(name="my_data.h5", limit=1)[0]
    file_obj = File.from_instance(existing_file_obj)
@@ -284,12 +322,12 @@ Below are common flows for creating a File:
 
 ### 4.3 Uploading & Overwriting Files
 
-Every method above that "creates" a File also performs an upload if the underlying data is not already in VeloxQ:
+Every method above that "creates" a `File` also performs an upload if the underlying data is not already in VeloxQ:
 
-• When you call from_path(…), from_dict(…), etc., the file is uploaded automatically.  
-• If you re-use the same "name" without setting force=True, you’ll get the existing file object without uploading again.  
+- When you call `from_instance(…)`, `from_path(…)`, `from_dict(…)`, etc., the file is uploaded automatically.
+- If you re-use the same `name` without setting `force=True`, you’ll get the existing file object without uploading again.
 
-Example of explicitly forcing an overwrite:
+**Example of explicitly forcing an overwrite:**
 ```python
 file_obj = File.from_instance(
     "path/to/updated_data.csv",
@@ -300,7 +338,7 @@ file_obj = File.from_instance(
 
 ### 4.4 Associating with Problems
 
-To group files under a specific Problem, pass a Problem object to the creation method:
+To group files under a specific `Problem`, pass a `Problem` object to the creation method:
 ```python
 my_problem = Problem.create("Experiment_Batch5")
 
@@ -330,22 +368,22 @@ This ensures that retrieving files for "Experiment_Batch5" will include "local_d
 
 ### 4.5 Downloading Files
 
-1. Retrieve a file by name:
+1. **Retrieve a file by name:**
 
-```python
-# Returns a list of matching files (max=5 in this example)
-file_list = File.get_files(name="my_data.csv", limit=5)
-for f in file_list:
-    print(f.id, f.name, f.status, f.problem.name)
-```
+   ```python
+   # Returns a list of matching files (max=5 in this example)
+   file_list = File.get_files(name="my_data.csv", limit=5)
+   for f in file_list:
+       print(f.id, f.name, f.status, f.problem.name)
+   ```
 
-2. Download the file content:
+2. **Download the file content:**
 
-```python
-# Suppose you have an existing File object
-with open("local_copy.h5", "wb") as outfile:
-    file_obj.download(outfile)
-```
+   ```python
+   # Suppose you have an existing File object
+   with open("local_copy.h5", "wb") as outfile:
+       file_obj.download(outfile)
+   ```
 
 ---
 
@@ -354,35 +392,91 @@ with open("local_copy.h5", "wb") as outfile:
 ### 5.1 One-Line Solve Workflow
 
 The simplest approach is using `solver.sample(...)`, which:
-1. Creates a `File` for your instance (dict, path, etc.).  
-2. Automatically submits a job to the VeloxQ platform.  
-3. Waits until completion.  
+
+1. Creates a `File` for your problem instance (biases and couplings defined as lists, NumPy arrays, dictionaries, file paths, etc.).
+2. Automatically submits a job to the VeloxQ platform.
+3. Waits until completion.
 4. Returns the job result.
 
-It uses the same argument types as `File.from_instance`.
+It accepts the same argument types as `File.from_instance`.
 
-Example:
+**Examples:**
 
-Submitting a problem defined in memory:
+**Submitting biases and couplings defined in memory:**
+
+**Using lists:**
 ```python
+from veloxq_sdk import VeloxQSolver
+
 solver = VeloxQSolver()
 
-instance_data = {
-  "h": [1, -1],
-  "J": [[0, -1], [-1, 0]]
-}
+biases = [1, -1, 0]
+couplings = [
+    [0, -1, 0],
+    [-1, 0, -1],
+    [0, -1, 0]
+]
 
-result = solver.sample(instance_data)  # returns JobResult object
+result = solver.sample(biases, couplings)  # returns JobResult object
 print(result.data["Spectrum"]["energies"][:])
 ```
 
-Or a problem defined in a file:
+**Using NumPy arrays:**
+```python
+import numpy as np
+from veloxq_sdk import VeloxQSolver
+
+solver = VeloxQSolver()
+
+biases = np.array([1, -1, 0])
+couplings = np.array([
+    [0, -1, 0],
+    [-1, 0, -1],
+    [0, -1, 0]
+])
+
+result = solver.sample(biases, couplings)
+print(result.data["Spectrum"]["energies"][:])
+```
+
+**Using dictionaries (sparse data):**
+```python
+from veloxq_sdk import VeloxQSolver
+
+solver = VeloxQSolver()
+
+biases = {0: 1.0, 2: -1.0}
+couplings = {(0, 1): -1.0, (1, 2): 0.5}
+
+result = solver.sample(biases=biases, couplings=couplings)
+print(result.data["Spectrum"]["energies"][:])
+```
+
+**Submitting a problem defined in a file:**
 
 ```python
+from veloxq_sdk import VeloxQSolver
+
 solver = VeloxQSolver()
 
 result = solver.sample("ising_model.h5")
-print(result.data["Spectrum"]["L"][:])
+print(result.data["Spectrum"]["energies"][:])
+```
+
+**Submitting an instance in dictionary format:**
+
+```python
+from veloxq_sdk import VeloxQSolver
+
+solver = VeloxQSolver()
+
+instance_data = {
+  "biases": [1, -1],
+  "couplings": [[0, -1], [-1, 0]]
+}
+
+result = solver.sample(instance_data)
+print(result.data["Spectrum"]["energies"][:])
 ```
 
 ### 5.2 Separate Submission
@@ -395,6 +489,8 @@ job = solver.submit(file_obj)  # returns a job instance
 
 job_id = job.id  # save for later
 ```
+
+Later, you can retrieve and check the job:
 
 ```python
 job = Job.from_id(job_id)  # get job from id
@@ -433,10 +529,10 @@ jobs = Job.get_jobs(
 
 #### 6.2.1 Filtering by Status or Creation Time
 
-- `status` can be `CREATED`, `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.  
+- `status` can be `CREATED`, `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
 - `created_at` can be `TODAY`, `YESTERDAY`, `LAST_WEEK`, `LAST_MONTH`, `LAST_3_MONTHS`, `LAST_YEAR`, `ALL`.
 
-Returns upward of `limit` jobs, default is 1000.
+Returns up to `limit` jobs; default is 1000.
 
 ### 6.3 Retrieving Job by ID
 

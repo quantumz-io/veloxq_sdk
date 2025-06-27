@@ -18,7 +18,11 @@ from veloxq_sdk.api.jobs import Job, JobResult
 from veloxq_sdk.api.problems import File, Problem
 
 if t.TYPE_CHECKING:
-    from veloxq_sdk.api.problems import InstanceLike
+    from veloxq_sdk.api.problems import (
+        BiasesType,
+        CouplingsType,
+        InstanceLike,
+    )
 
 
 class BaseSolver(BaseModel):
@@ -38,12 +42,13 @@ class BaseSolver(BaseModel):
     parameters: VeloxQParameters
     backend: BaseBackend
 
+    @t.overload
     def sample(
         self,
         instance: InstanceLike,
+        *,
         name: str | None = None,
         problem: Problem | None = None,
-        *,
         force: bool = False,
     ) -> JobResult:
         """Solve a problem instance using the solver.
@@ -53,21 +58,81 @@ class BaseSolver(BaseModel):
         and finally returns the job result.
 
         Args:
-            instance (InstanceLike):
-                The problem representation, which can be:
-                    - File object.
-                    - file path (str or Path).
-                    - dict following the InstanceDict specification.
-                    - tuple of (biases, coupling).
+            instance (InstanceLike): An instance of a problem to be solved.
+            name (str | None): Optional name for the job. Defaults to None.
+            problem (Problem | None): Optional problem instance to use. Defaults to None.
+            force (bool): If True, forces the creation of a new file even if it already exists.
+                Defaults to False.
 
-            name (str | None):
-                Optional name to assign to the file on the platform.
+        Returns:
+            JobResult: An object that provides access to the completed job's results.
 
-            problem (Problem | None):
-                Optional Problem object. Uses "undefined" by default.
+        Example:
+            >>> solver = VeloxQSolver()
+            >>> result = solver.sample('problem_1.txt')
+            >>> print(result.data['Spectrum']['energies'][:])
 
-            force (bool):
-                If True, overwrite any existing file with the same name.
+        """
+
+    @t.overload
+    def sample(
+        self,
+        biases: BiasesType,
+        coupling: CouplingsType,
+        *,
+        name: str | None = None,
+        problem: Problem | None = None,
+        force: bool = False,
+    ) -> JobResult:
+        """Solve a problem instance using the solver.
+
+        This method takes an instance of a problem (such as Ising model data or
+        a local file), submits a job to the VeloxQ platform, waits for its completion,
+        and finally returns the job result.
+
+        Args:
+            biases (BiasesType): Biases for the problem instance.
+            coupling (CouplingsType): Coupling matrices for the problem instance.
+            name (str | None): Optional name for the job. Defaults to None.
+            problem (Problem | None): Optional problem instance to use. Defaults to None.
+            force (bool): If True, forces the creation of a new file even if it already exists.
+                Defaults to False.
+
+        Returns:
+            JobResult: An object that provides access to the completed job's results.
+
+        Example:
+            >>> solver = VeloxQSolver()
+            >>> h = np.array([1, -1])
+            >>> J = np.array([[0, -1], [-1, 0]])
+            >>> result = solver.sample(h, J)
+            >>> print(result.data['Spectrum']['energies'][:])
+
+        """
+
+    def sample(
+        self,
+        *args,
+        name: str | None = None,
+        problem: Problem | None = None,
+        force: bool = False,
+        **kwargs,
+    ) -> JobResult:
+        """Solve a problem instance using the solver.
+
+        This method takes an instance of a problem (such as Ising model data or
+        a local file), submits a job to the VeloxQ platform, waits for its completion,
+        and finally returns the job result.
+
+        Args:
+            *args: Positional arguments that can be either an instance of `InstanceLike`
+                or a tuple of biases and coupling matrices.
+            name (str | None): Optional name for the job. Defaults to None.
+            problem (Problem | None): Optional problem instance to use. Defaults to None.
+            force (bool): If True, forces the creation of a new file even if it already exists.
+                Defaults to False.
+            **kwargs: Can receive coupling and biases as keyword arguments if not provided
+                as positional arguments.
 
         Returns:
             JobResult: An object that provides access to the completed job's results.
@@ -79,7 +144,17 @@ class BaseSolver(BaseModel):
             >>> print(result.data['Spectrum']['energies'][:])
 
         """
-        file = File.from_instance(instance, name=name, problem=problem, force=force)
+        if len(args) == 1:
+            instance = args[0]
+        elif len(args) == 2:
+            instance = args
+        elif len(args) != 0:
+            msg = f'Expected 1 or 2 positional arguments, got {len(args)}.'
+            raise ValueError(msg)
+        else:
+            instance = kwargs
+
+        file = File.from_instance(instance, name=name, problem=problem, force=force)  # type: ignore[arg-type]
         job = self.submit(file)
         job.wait_for_completion()
         return job.result

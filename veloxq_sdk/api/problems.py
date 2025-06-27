@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryFile
 
 import h5py
-from numpy import ndarray
+import numpy as np
 from pydantic import Field
 
 from veloxq_sdk.api.base import BaseModel
@@ -28,24 +28,25 @@ InstanceLike = t.Union[
     Path,
     str,
 ]
-BiasesType = t.Union[t.List[float], ndarray]
-CouplingType = t.Union[t.List[t.List[float]], ndarray]
-InstanceTuple = t.Tuple[BiasesType, CouplingType]
+
+BiasesType = t.Union[t.List[float], np.ndarray, t.Dict[int, float]]
+CouplingsType = t.Union[t.List[t.List[float]], np.ndarray, t.Dict[t.Tuple[int, int], float]]
+InstanceTuple = t.Tuple[BiasesType, CouplingsType]
 
 
 class InstanceDict(t.TypedDict):
     """A dictionary type for Ising-model instances.
 
     Attributes:
-        h (BiasesType): A list or NumPy array of float values 
+        biases (BiasesType): A list or NumPy array of float values 
             representing the bias terms in an Ising model.
-        J (CouplingType): A nested list or NumPy array of float values
+        couplings (CouplingType): A nested list or NumPy array of float values
             representing the coupling terms in an Ising model.
 
     """
 
-    h: BiasesType
-    J: CouplingType
+    biases: BiasesType
+    couplings: CouplingsType
 
 
 class Problem(BaseModel):
@@ -100,7 +101,7 @@ class Problem(BaseModel):
         return File.create(name=name, size=size, problem=self)
 
     @classmethod
-    def undefined(cls) -> "Problem":
+    def undefined(cls) -> Problem:
         """Retrieve or create a default "undefined" Problem instance.
 
         Used when no specific problem context was provided.
@@ -118,7 +119,7 @@ class Problem(BaseModel):
         return cls.create(name='undefined')
 
     @classmethod
-    def create(cls, name: str) -> "Problem":
+    def create(cls, name: str) -> Problem:
         """Create a new problem.
 
         Args:
@@ -134,7 +135,7 @@ class Problem(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
-    def get_problems(cls, name: str | None = None, limit: int = 1000) -> list["Problem"]:
+    def get_problems(cls, name: str | None = None, limit: int = 1000) -> list[Problem]:
         """Get all user problems, optionally filtering by name.
 
         Args:
@@ -155,7 +156,7 @@ class Problem(BaseModel):
         return [cls.model_validate(item) for item in data]
 
     @classmethod
-    def from_id(cls, problem_id: int) -> "Problem":
+    def from_id(cls, problem_id: int) -> Problem:
         """Create a Problem instance from an integer ID.
 
         Args:
@@ -395,7 +396,7 @@ class File(BaseModel):
         The Dictonary must follow InstanceDict specification.
 
         Args:
-            data (InstanceDict): Must contain "biases" and "coupling" keys.
+            data (InstanceDict): Must contain "biases" and "couplings" keys.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
             force (bool): If True, overwrite if a file with the same name exists.
@@ -406,7 +407,7 @@ class File(BaseModel):
         """
         return cls.from_ising(
             biases=data['biases'],
-            coupling=data['coupling'],
+            coupling=data['couplings'],
             name=name,
             problem=problem,
             force=force,
@@ -448,7 +449,7 @@ class File(BaseModel):
     def from_ising(
         cls,
         biases: BiasesType,
-        coupling: CouplingType,
+        coupling: CouplingsType,
         name: str | None = None,
         problem: Problem | None = None,
         *,
@@ -478,9 +479,17 @@ class File(BaseModel):
                 return existing_files[0]
 
         with TemporaryFile() as temp_file:
-            with h5py.File(temp_file, 'w') as h5file:
-                h5file.create_dataset('/ising/biases', data=biases)
-                h5file.create_dataset('/ising/couplings', data=coupling)
+            if isinstance(biases, dict) and isinstance(coupling, dict):
+                cls._write_dataset_dict(temp_file, biases, coupling)
+            elif isinstance(biases, (list, np.ndarray)) and isinstance(coupling, (list, np.ndarray)):
+                cls._write_dataset_array(temp_file, biases, coupling)
+            else:
+                msg = (
+                    'Unsupported data types for biases and coupling. '
+                    'Expected lists, NumPy arrays, or dictionaries.'
+                )
+                raise TypeError(msg)
+
             temp_file.flush()
 
             temp_file_size = temp_file.tell()
@@ -599,7 +608,9 @@ class File(BaseModel):
         """Override model_validate to handle Problem association."""
         if 'problem' not in obj:
             obj['problem'] = Problem.from_id(obj['problemId'])
-        return super().model_validate(obj, strict=strict, from_attributes=from_attributes, context=context)
+        return super().model_validate(
+            obj, strict=strict, from_attributes=from_attributes, context=context,
+        )
 
     @staticmethod
     def _create_hash(
@@ -620,3 +631,58 @@ class File(BaseModel):
         while chunk := file.read(chunk_size):
             hasher.update(chunk)
         return hasher.hexdigest()
+
+    @staticmethod
+    def _write_dataset_array(
+        file: t.BinaryIO,
+        biases: np.ndarray | list[float],
+        coupling: np.ndarray | list[list[float]],
+    ) -> None:
+        """Write the Ising model data to an HDF5 file.
+
+        This method handles both NumPy arrays and lists for biases and coupling.
+
+        Args:
+            file (BinaryIO): The file-like object to write the data to.
+            biases (np.ndarray | list[float]): The bias terms in the Ising model.
+            coupling (np.ndarray | list[list[float]]): The coupling terms in the Ising model.
+
+        """
+        with h5py.File(file, 'w') as hdf:
+            hdf.create_dataset('/Ising/biases', data=biases)
+            hdf.create_dataset('/Ising/coupling', data=coupling)
+
+    @staticmethod
+    def _write_dataset_dict(
+        file: t.BinaryIO,
+        biases: t.Dict[int, float],
+        coupling: t.Dict[t.Tuple[int, int], float],
+    ) -> None:
+        """Write the Ising model data to an HDF5 file.
+
+        Args:
+            file (BinaryIO): The file-like object to write the data to.
+            biases (Dict[int, float]): A dictionary mapping qubit indices to bias values.
+            coupling (Dict[Tuple[int, int], float]): A dictionary mapping pairs of qubit
+                                                     indices to coupling values.
+
+        """
+        num_qubits = max(biases.keys(), default=0) + 1
+
+        with h5py.File(file, 'w') as hdf:
+            dataset = hdf.create_dataset(
+                '/Ising/biases',
+                shape=(num_qubits,),
+                dtype=float,
+            )
+            for i in range(num_qubits):
+                dataset[i] = biases.get(i, 0.0)
+
+            coupling_matrix = hdf.create_dataset(
+                '/Ising/coupling',
+                shape=(num_qubits, num_qubits),
+                dtype=float,
+            )
+            for (i, j), value in coupling.items():
+                coupling_matrix[i, j] = value
+                coupling_matrix[j, i] = value
