@@ -349,7 +349,7 @@ with open("local_copy.h5", "wb") as outfile:
 
 ### 5.1 One-Line Solve Workflow
 
-The simplest approach is using `solver.solve(...)`, which:
+The simplest approach is using `solver.sample(...)`, which:
 1. Creates a `File` for your instance (dict, path, etc.).  
 2. Automatically submits a job to the VeloxQ platform.  
 3. Waits until completion.  
@@ -368,7 +368,7 @@ instance_data = {
   "coupling": [[0, -1], [-1, 0]]
 }
 
-result = solver.solve(instance_data)  # returns JobResult object
+result = solver.sample(instance_data)  # returns JobResult object
 print(result.data["Spectrum"]["energies"][:])
 ```
 
@@ -377,7 +377,7 @@ Or a problem defined in a file:
 ```python
 solver = VeloxQSolver()
 
-result = solver.solve("ising_model.h5")
+result = solver.sample("ising_model.h5")
 print(result.data["Spectrum"]["L"][:])
 ```
 

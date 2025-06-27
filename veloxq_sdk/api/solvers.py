@@ -38,7 +38,7 @@ class BaseSolver(BaseModel):
     parameters: VeloxQParameters
     backend: BaseBackend
 
-    def solve(
+    def sample(
         self,
         instance: InstanceLike,
         name: str | None = None,
@@ -75,7 +75,7 @@ class BaseSolver(BaseModel):
         Example:
             >>> solver = VeloxQSolver()
             >>> instance = {'biases': [1, -1], 'coupling': [[0, -1], [-1, 0]]}
-            >>> result = solver.solve(instance)
+            >>> result = solver.sample(instance)
             >>> print(result.data['Spectrum']['energies'][:])
 
         """
