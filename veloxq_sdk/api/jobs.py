@@ -281,6 +281,7 @@ class Job(BaseModel):
                     raise TimeoutError(msg)
                 message = json.loads(ws.recv())
                 waiting = not message['finished']
+        self.refresh()
 
     def get_job_logs(
         self,
