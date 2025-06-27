@@ -82,7 +82,6 @@ class VeloxQAPIConfig(SingletonConfigurable):
     def __init__(self, **kwargs: t.Any) -> None:
         """Initialize the VeloxQAPIConfig."""
         super().__init__(**kwargs)
-        self.load_config_environ()
 
     def load_config_environ(self) -> None:
         """Load config files by environment."""
