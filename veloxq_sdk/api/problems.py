@@ -245,10 +245,10 @@ class File(BaseModel):
     def refresh(self) -> None:
         """Refresh the file data from the API."""
         response = self._http.get(
-            f'problems/{self.problem.id}/files', params={'_page': 1, '_limit': 1, 'q': self.id}
+            f'/problems/{self.problem.id}/files/{self.id}/upload-status',
         )
         response.raise_for_status()
-        data = response.json()['data'][0]
+        data = response.json()
         self.model_update(data)
 
     @classmethod
@@ -310,11 +310,10 @@ class File(BaseModel):
             ValueError: If no file with the given ID is found.
 
         """
-        file = cls.get_files(name=file_id, limit=1)
-        if not file:
-            msg = f'File with ID {file_id} not found.'
-            raise ValueError(msg)
-        return file[0]
+        response = cls._http.get(f'files/{file_id}')
+        response.raise_for_status()
+        data = response.json()
+        return cls.model_validate(data)
 
     @classmethod
     def from_instance(
@@ -488,6 +487,9 @@ class File(BaseModel):
             temp_file.seek(0)
 
             name = name or (cls._create_hash(temp_file) + '.h5')
+            if not force and (existing_files := cls.get_files(name=name, limit=1)):
+                return existing_files[0]
+
             temp_file.seek(0)
 
             new_file = cls.create(name=name, size=temp_file_size, problem=problem)
@@ -595,7 +597,8 @@ class File(BaseModel):
         context: t.Any = None,
     ) -> File:
         """Override model_validate to handle Problem association."""
-        obj['problem'] = obj.get('problem', Problem.from_id(obj['problemId']))
+        if 'problem' not in obj:
+            obj['problem'] = Problem.from_id(obj['problemId'])
         return super().model_validate(obj, strict=strict, from_attributes=from_attributes, context=context)
 
     @staticmethod

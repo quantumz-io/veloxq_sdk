@@ -59,8 +59,9 @@ class BaseModel(BasePydanticModel, ClientMixin):
             raise ValueError(msg)
         update = self.model_dump(mode='json')
         update.update(data)
-        for k,v in self.model_validate(update).model_dump(exclude_defaults=True).items():
+        updated_model = self.model_validate(update)
+        for k in updated_model.model_fields:
             if k == 'id':
                 continue
-            setattr(self, k, v)
+            setattr(self, k, getattr(updated_model, k))
         return self
