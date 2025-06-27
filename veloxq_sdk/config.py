@@ -59,13 +59,18 @@ class VeloxQAPIConfig(SingletonConfigurable):
 
     name = 'veloxq-api-sdk'
 
-    url = Unicode('https://api-dev.veloxq.com',
-                  config=True,
-                  help='Base URL for the VeloxQ API.')
+    url = Unicode(
+        default_value=os.environ.get('VELOXQ_API_URL', 'https://api-dev.veloxq.com'),
+        config=True,
+        help='Base URL for the VeloxQ API.',
+    )
 
-    token = Unicode(allow_none=False, config=True,
-                    help='API token for authentication with the VeloxQ service.')
-
+    token = Unicode(
+        default_value=os.environ.get('VELOX_TOKEN', ''),
+        allow_none=False,
+        config=True,
+        help='API token for authentication with the VeloxQ service.',
+    )
 
     raise_config_file_errors = Bool(TRAITLETS_APPLICATION_RAISE_CONFIG_FILE_ERROR)
 
