@@ -407,7 +407,7 @@ class File(BaseModel):
         """
         return cls.from_ising(
             biases=data['biases'],
-            coupling=data['couplings'],
+            couplings=data['couplings'],
             name=name,
             problem=problem,
             force=force,
@@ -424,10 +424,10 @@ class File(BaseModel):
     ) -> File:
         """Create a File instance from a tuple.
 
-        The tuple must contain two elements: biases and coupling.
+        The tuple must contain two elements: biases and couplings.
 
         Args:
-            data (InstanceTuple): A tuple (biases, coupling), where each element
+            data (InstanceTuple): A tuple (biases, couplings), where each element
                                   is a list, list-of-lists, or NumPy array.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
@@ -439,7 +439,7 @@ class File(BaseModel):
         """
         return cls.from_ising(
             biases=data[0],
-            coupling=data[1],
+            couplings=data[1],
             name=name,
             problem=problem,
             force=force,
@@ -449,7 +449,7 @@ class File(BaseModel):
     def from_ising(
         cls,
         biases: BiasesType,
-        coupling: CouplingsType,
+        couplings: CouplingsType,
         name: str | None = None,
         problem: Problem | None = None,
         *,
@@ -479,13 +479,13 @@ class File(BaseModel):
                 return existing_files[0]
 
         with TemporaryFile() as temp_file:
-            if isinstance(biases, dict) and isinstance(coupling, dict):
-                cls._write_dataset_dict(temp_file, biases, coupling)
-            elif isinstance(biases, (list, np.ndarray)) and isinstance(coupling, (list, np.ndarray)):
-                cls._write_dataset_array(temp_file, biases, coupling)
+            if isinstance(biases, dict) and isinstance(couplings, dict):
+                cls._write_dataset_dict(temp_file, biases, couplings)
+            elif isinstance(biases, (list, np.ndarray)) and isinstance(couplings, (list, np.ndarray)):
+                cls._write_dataset_array(temp_file, biases, couplings)
             else:
                 msg = (
-                    'Unsupported data types for biases and coupling. '
+                    'Unsupported data types for biases and couplings. '
                     'Expected lists, NumPy arrays, or dictionaries.'
                 )
                 raise TypeError(msg)
@@ -636,34 +636,34 @@ class File(BaseModel):
     def _write_dataset_array(
         file: t.BinaryIO,
         biases: np.ndarray | list[float],
-        coupling: np.ndarray | list[list[float]],
+        couplings: np.ndarray | list[list[float]],
     ) -> None:
         """Write the Ising model data to an HDF5 file.
 
-        This method handles both NumPy arrays and lists for biases and coupling.
+        This method handles both NumPy arrays and lists for biases and couplings.
 
         Args:
             file (BinaryIO): The file-like object to write the data to.
             biases (np.ndarray | list[float]): The bias terms in the Ising model.
-            coupling (np.ndarray | list[list[float]]): The coupling terms in the Ising model.
+            couplings (np.ndarray | list[list[float]]): The coupling terms in the Ising model.
 
         """
         with h5py.File(file, 'w') as hdf:
             hdf.create_dataset('/Ising/biases', data=biases)
-            hdf.create_dataset('/Ising/coupling', data=coupling)
+            hdf.create_dataset('/Ising/couplings', data=couplings)
 
     @staticmethod
     def _write_dataset_dict(
         file: t.BinaryIO,
         biases: t.Dict[int, float],
-        coupling: t.Dict[t.Tuple[int, int], float],
+        couplings: t.Dict[t.Tuple[int, int], float],
     ) -> None:
         """Write the Ising model data to an HDF5 file.
 
         Args:
             file (BinaryIO): The file-like object to write the data to.
             biases (Dict[int, float]): A dictionary mapping qubit indices to bias values.
-            coupling (Dict[Tuple[int, int], float]): A dictionary mapping pairs of qubit
+            couplings (Dict[Tuple[int, int], float]): A dictionary mapping pairs of qubit
                                                      indices to coupling values.
 
         """
@@ -679,10 +679,10 @@ class File(BaseModel):
                 dataset[i] = biases.get(i, 0.0)
 
             coupling_matrix = hdf.create_dataset(
-                '/Ising/coupling',
+                '/Ising/couplings',
                 shape=(num_qubits, num_qubits),
                 dtype=float,
             )
-            for (i, j), value in coupling.items():
+            for (i, j), value in couplings.items():
                 coupling_matrix[i, j] = value
                 coupling_matrix[j, i] = value
