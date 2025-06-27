@@ -253,7 +253,7 @@ Create a `File` directly from biases and couplings defined as dictionaries. This
 
 ```python
 biases = {0: 1.0, 2: -1.0}  # Variable indices mapped to bias values
-couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to coupling values
+couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to couplings values
 
 file_obj = File.from_instance((biases, couplings), name="sparse_ising.h5")
 ```
