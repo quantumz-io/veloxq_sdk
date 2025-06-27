@@ -1,3 +1,9 @@
+"""VeloxQ API Problems Module.
+
+This module provides classes and methods for interacting with the VeloxQ API, focusing on
+Problem and File entities. These classes enable creating, retrieving, uploading, downloading,
+and managing files and problems within the VeloxQ platform.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -8,10 +14,12 @@ from pathlib import Path
 from tempfile import TemporaryFile
 
 import h5py
-from numpy import dtype, ndarray
+from numpy import ndarray
 from pydantic import Field
 
 from veloxq_sdk.api.base import BaseModel
+
+_logger = logging.getLogger(__name__)
 
 InstanceLike = t.Union[
     'InstanceDict',
@@ -20,51 +28,88 @@ InstanceLike = t.Union[
     Path,
     str,
 ]
-
 BiasesType = t.Union[t.List[float], ndarray]
 CouplingType = t.Union[t.List[t.List[float]], ndarray]
-
 InstanceTuple = t.Tuple[BiasesType, CouplingType]
-
-_logger = logging.getLogger(__name__)
 
 
 class InstanceDict(t.TypedDict):
-    """A dictionary type for instances."""
+    """A dictionary type for Ising-model instances.
+
+    Attributes:
+        biases (BiasesType): A list or NumPy array of float values 
+            representing the bias terms in an Ising model.
+        coupling (CouplingType): A nested list or NumPy array of float values
+            representing the coupling terms in an Ising model.
+
+    """
 
     biases: BiasesType
     coupling: CouplingType
 
 
 class Problem(BaseModel):
-    """A class representing a problem in the VeloxQ API."""
-    name: str = Field(description="The name of the problem.")
+    """A class representing a problem in the VeloxQ API.
 
-    created_at: datetime = Field(description="The date and time when the problem was created.")
-    updated_at: datetime = Field(description="The date and time when the problem was last updated.")
+    This class stores metadata about a given problem, including name and timestamps
+    for creation and updates. It also allows operations such as listing and creating
+    files associated with a particular problem.
+
+    Attributes:
+        name (str): The name of the problem.
+        created_at (datetime): The datetime of when the problem was created.
+        updated_at (datetime): The datetime of the last update to the problem.
+
+    """
+
+    name: str = Field(description='The name of the problem.')
+    created_at: datetime = Field(description='The date and time when the problem was created.')
+    updated_at: datetime = Field(description='The date and time when the problem was last updated.')
 
     def get_files(self, name: str | None = None, limit: int = 1000) -> list[File]:
-        """Get all files associated with this problem."""
+        """Get all files associated with this problem.
+
+        Args:
+            name (str | None): Optional query string to filter files by name.
+            limit (int): Maximum number of files to return (default 1000).
+
+        Returns:
+            list[File]: A list of files that belong to this problem.
+
+        """
         params: dict[str, int | str] = {'_page': 1, '_limit': limit}
         if name:
             params['q'] = name
 
-        response = self._http.get(f'problems/{self.id}/files',
-                                    params=params)
+        response = self._http.get(f'problems/{self.id}/files', params=params)
         response.raise_for_status()
         data = response.json()['data']
         return [File.model_validate(item) for item in data]
 
     def new_file(self, name: str, size: int) -> File:
-        """Create a new file for this problem."""
+        """Create a new file for this problem.
+
+        Args:
+            name (str): The name of the file to create.
+            size (int): The file size in bytes.
+
+        Returns:
+            File: A File object that references the newly created file on the server.
+
+        """
         return File.create(name=name, size=size, problem=self)
 
     @classmethod
-    def undefined(cls) -> Problem:
-        """Default Problem instance."""
+    def undefined(cls) -> "Problem":
+        """Retrieve or create a default "undefined" Problem instance.
 
-        response = cls._http.get('problems',
-                                 params={'_page': 1, '_limit': 1, 'q': 'undefined'})
+        Used when no specific problem context was provided.
+
+        Returns:
+            Problem: The default Problem with the name "undefined".
+
+        """
+        response = cls._http.get('problems', params={'_page': 1, '_limit': 1, 'q': 'undefined'})
         response.raise_for_status()
         data = response.json()['data']
         if data:
@@ -73,16 +118,33 @@ class Problem(BaseModel):
         return cls.create(name='undefined')
 
     @classmethod
-    def create(cls, name: str) -> Problem:
-        """Create a new problem."""
+    def create(cls, name: str) -> "Problem":
+        """Create a new problem.
+
+        Args:
+            name (str): The name for the new problem.
+
+        Returns:
+            Problem: The newly created Problem object as stored on the server.
+
+        """
         response = cls._http.post('problems', json={'name': name})
         response.raise_for_status()
         data = response.json()
         return cls.model_validate(data)
 
     @classmethod
-    def get_problems(cls, name: str | None = None, limit: int = 1000) -> list[Problem]:
-        """Get all user problems."""
+    def get_problems(cls, name: str | None = None, limit: int = 1000) -> list["Problem"]:
+        """Get all user problems, optionally filtering by name.
+
+        Args:
+            name (str | None): An optional query parameter to filter problems by name.
+            limit (int): The maximum number of problems to return (default 1000).
+
+        Returns:
+            list[Problem]: A list of problems matching the query.
+
+        """
         params: dict[str, int | str] = {'_page': 1, '_limit': limit}
         if name:
             params['q'] = name
@@ -93,8 +155,16 @@ class Problem(BaseModel):
         return [cls.model_validate(item) for item in data]
 
     @classmethod
-    def from_id(cls, problem_id: int) -> Problem:
-        """Create a Problem instance from an ID."""
+    def from_id(cls, problem_id: int) -> "Problem":
+        """Create a Problem instance from an integer ID.
+
+        Args:
+            problem_id (int): The unique problem ID in the VeloxQ system.
+
+        Returns:
+            Problem: The matching Problem object, if found.
+
+        """
         response = cls._http.get(f'problems/{problem_id}')
         response.raise_for_status()
         data = response.json()
@@ -102,30 +172,42 @@ class Problem(BaseModel):
 
 
 class File(BaseModel):
-    """A class representing a file in the VeloxQ API."""
-    name: str
+    """A class representing a file in the VeloxQ API [2].
 
-    size: int = Field(
-        description="The size of the file in bytes.",
-    )
-    uploaded_bytes: int = Field(
-        description="The number of bytes that have been uploaded.",
-    )
-    problem: Problem = Field(
-        description="The problem associated with this file.",
-    )
-    created_at: datetime = Field(
-        description="The date and time when the file was created.",
-    )
+    Files are associated with a specific problem and contain attributes such as
+    name, size, and status. This class provides methods for uploading, downloading,
+    and managing files on the VeloxQ platform.
+
+    Attributes:
+        name (str): The name of the file (with or without file extension).
+        size (int): The total size of the file in bytes.
+        uploaded_bytes (int): The number of bytes that have been uploaded so far.
+        problem (Problem): The Problem instance to which this file belongs.
+        created_at (datetime): The date/time this file was created.
+        updated_at (Optional[datetime]): The date/time this file was last updated.
+        status (str): The current status of this file upload (e.g., "completed").
+
+    """
+
+    name: str
+    size: int = Field(description='The size of the file in bytes.')
+    uploaded_bytes: int = Field(description='The number of bytes that have been uploaded.')
+    problem: Problem = Field(description='The problem associated with this file.')
+    created_at: datetime = Field(description='The date and time when the file was created.')
     updated_at: t.Optional[datetime] = Field(
         default=None,
-        description="The date and time when the file was updated.",
+        description='The date and time when the file was updated.',
     )
-    status: str = Field(
-        description="The status of the file upload.",
-    )
+    status: str = Field(description='The status of the file upload.')
 
-    def upload(self, content: t.IO, chunk_size: int = 1024*1024):
+    def upload(self, content: t.IO, chunk_size: int = 1024 * 1024) -> None:
+        """Upload content to this File via a WebSocket.
+
+        Args:
+            content (t.IO): A file-like object to read from.
+            chunk_size (int): Size of each data chunk in bytes. Defaults to 1 MB.
+
+        """
         with self.http.open_ws(
             f'problems/{self.problem.id}/files/{self.id}/upload/ws',
         ) as ws:
@@ -134,49 +216,62 @@ class File(BaseModel):
             ws.send(b'')
         self.refresh()
 
-    def download(self, file: t.BinaryIO, chunk_size: int = 1024*1024) -> None:
-        """Download the file content."""
-        download_url = self.http.get(
-            f'problems/{self.problem.id}/files/{self.id}',
-        )
+    def download(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
+        """Download the file content from VeloxQ and write it to a binary file-like object.
+
+        Args:
+            file (t.BinaryIO): The destination file-like object to write data to.
+            chunk_size (int): Size of the data chunks to read. Defaults to 1 MB.
+
+        """
+        download_url = self.http.get(f'problems/{self.problem.id}/files/{self.id}')
         download_url.raise_for_status()
-        with self.http.stream(
-            'GET',
-            download_url.text,
-        ) as response:
+        with self.http.stream('GET', download_url.text) as response:
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
 
     def cancel(self) -> None:
-        """Cancel the file upload."""
+        """Cancel the file upload on the VeloxQ platform."""
         response = self._http.delete(f'problems/{self.problem.id}/files/{self.id}/cancel')
         response.raise_for_status()
         self.refresh()
 
     def delete(self) -> None:
-        """Delete the file."""
+        """Delete this file from the VeloxQ platform."""
         response = self._http.delete(f'problems/{self.problem.id}/files/{self.id}')
         response.raise_for_status()
 
     def refresh(self) -> None:
         """Refresh the file data from the API."""
-        response = self._http.get(f'problems/{self.problem.id}/files',
-                                  params={'_page': 1, '_limit': 1, 'q': self.id})
+        response = self._http.get(
+            f'problems/{self.problem.id}/files', params={'_page': 1, '_limit': 1, 'q': self.id}
+        )
         response.raise_for_status()
         data = response.json()['data'][0]
         self.model_update(data)
 
     @classmethod
     def create(cls, name: str, size: int, problem: Problem | None = None) -> File:
-        """Create a new file."""
+        """Create a new file on the VeloxQ platform.
+
+        This method requests an upload URL for a new file, and returns the related File.
+        The name must contain a valid extension (e.g., '.h5', '.txt', '.csv', ...).
+
+        Args:
+            name (str): The name of the file to create.
+            size (int): The file size in bytes.
+            problem (Problem | None): Optional problem to associate with. 
+                If None, a default "undefined" problem is used.
+
+        Returns:
+            File: A File object representing the newly created entry on the server.
+
+        """
         problem = problem or Problem.undefined()
         response = cls._http.post(
             f'problems/{problem.id}/files/upload-request',
-            json={
-                'file_name': name,
-                'size': size,
-            },
+            json={'file_name': name, 'size': size},
         )
         response.raise_for_status()
         data = response.json()
@@ -185,20 +280,36 @@ class File(BaseModel):
 
     @classmethod
     def get_files(cls, name: str | None, limit: int = 1000) -> list[File]:
-        """Get all user files."""
+        """Get all user files, optionally filtered by name.
+
+        Args:
+            name (str | None): Optional query string to filter files by name.
+            limit (int): Maximum number of files to return. Default is 1000.
+
+        """
         params: dict[str, int | str] = {'_page': 1, '_limit': limit}
         if name:
             params['q'] = name
 
-        response = cls._http.get('files',
-                                 params=params)
+        response = cls._http.get('files', params=params)
         response.raise_for_status()
         data = response.json()['data']
         return [cls.model_validate(item) for item in data]
 
     @classmethod
     def from_id(cls, file_id: str) -> File:
-        """Create a File instance from an ID."""
+        """Get a File instance using a file's ID.
+
+        Args:
+            file_id (str): The unique identifier for the file.
+
+        Returns:
+            File: The matching File object.
+
+        Raises:
+            ValueError: If no file with the given ID is found.
+
+        """
         file = cls.get_files(name=file_id, limit=1)
         if not file:
             msg = f'File with ID {file_id} not found.'
@@ -214,7 +325,33 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from an InstanceLike object."""
+        """Create or retrieve a File instance.
+
+        Multiple input types (File, Path, str, dict, or tuple) are supported.
+        Path and str inpits are treated as file paths and so must contain
+        a valid extension unless a name is provided.
+
+        By default, if a file with the same name already exists,
+        it will not be overwritten unless `force` is set to True.
+
+        Args:
+            instance (InstanceLike): This can be:
+                - An existing File object.
+                - A file path or string representing the file path.
+                - A dictionary conforming to the InstanceDict structure.
+                - A tuple conforming to InstanceTuple (biases, couplings).
+            name (str | None): Optional file name to assign if creating a new file.
+            problem (Problem | None): Optional Problem to associate with this file.
+            force (bool): If True, overwrite existing files with the same
+                          name and re-upload content.
+
+        Returns:
+            File: A File object representing the data source provided.
+
+        Raises:
+            TypeError: If the instance type is unrecognized.
+
+        """
         if isinstance(instance, File):
             return instance
         if isinstance(instance, (Path, str)):
@@ -254,7 +391,20 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from a dictionary."""
+        """Create a File instance from a dictionary.
+
+        The Dictonary must follow InstanceDict specification.
+
+        Args:
+            data (InstanceDict): Must contain "biases" and "coupling" keys.
+            name (str | None): The file name. By default a hash-based name is generated.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
+
+        Returns:
+            File: A File object representing the newly created Ising data file.
+
+        """
         return cls.from_ising(
             biases=data['biases'],
             coupling=data['coupling'],
@@ -272,7 +422,21 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from a tuple."""
+        """Create a File instance from a tuple.
+
+        The tuple must contain two elements: biases and coupling.
+
+        Args:
+            data (InstanceTuple): A tuple (biases, coupling), where each element
+                                  is a list, list-of-lists, or NumPy array.
+            name (str | None): The file name. By default a hash-based name is generated.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
+
+        Returns:
+            File: A newly created File containing the specified Ising data.
+
+        """
         return cls.from_ising(
             biases=data[0],
             coupling=data[1],
@@ -291,8 +455,22 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from an Ising model."""
+        """Create a File instance from Ising model.
 
+        A temporary HDF5 file is created to store the Ising model data.
+        The file is then uploaded to the VeloxQ platform, and a File object is returned.
+
+        Args:
+            biases (BiasesType): The bias terms in the Ising model.
+            coupling (CouplingType): The coupling terms in the Ising model.
+            name (str | None): The file name. By default a hash-based name is generated.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
+
+        Returns:
+            File: The resulting File object.
+
+        """
         if name:
             if (ext_idx := name.find('.')) != -1:
                 name = name[:ext_idx]
@@ -312,15 +490,7 @@ class File(BaseModel):
             name = name or (cls._create_hash(temp_file) + '.h5')
             temp_file.seek(0)
 
-            # TODO(hendrik): check if the file already exists under the problem
-            # and return it if it does.
-
-            new_file = cls.create(
-                name=name,
-                size=temp_file_size,
-                problem=problem,
-            )
-
+            new_file = cls.create(name=name, size=temp_file_size, problem=problem)
             new_file.upload(temp_file)
 
         return new_file
@@ -334,38 +504,37 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from a file path.
+        """Create a File instance from a local file path.
 
-        The name or path must contain the file extension.
-
-        Uploads the file content to the API and returns a File instance.
+        This method uploads a file from the local filesystem to the VeloxQ platform.
+        The path must contain a valid extension (e.g., '.h5', '.txt', '.csv', ...) in
+        case a name is not provided. If a name is provided, it will be used
+        regardless of the file's original name and must also contain a valid extension.
 
         Args:
-            path (Path | str): The path to the file.
-            name (str | None): The name of the file. If None, the file's name will be used.
-            problem (Problem | None): The problem associated with the file. If None, a default problem will be used.
-            force (bool): If True, overwrite existing files with the same name.
+            path (Path | str): The path to the file on the local filesystem.
+            name (str | None): The file name. By default uses the path's filename.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
 
         Returns:
-            File: The created File instance.
+            File: The newly created File object.
+
+        Raises:
+            FileNotFoundError: If the specified path does not exist.
 
         """
         path = Path(path)
         if not path.exists():
-            raise FileNotFoundError(f'File {path} does not exist.')
+            msg = f'File {path} does not exist.'
+            raise FileNotFoundError(msg)
         name = name or path.name
 
         existing_files = cls.get_files(name=name, limit=1)
         if existing_files and not force:
             return existing_files[0]
 
-        # TODO(hendrik): check if the file already exists under the problem
-        # and return it if it does.
-
-        new_file = cls.create(name=name,
-                              size=path.stat().st_size,
-                              problem=problem)
-
+        new_file = cls.create(name=name, size=path.stat().st_size, problem=problem)
         with path.open('rb') as file_content:
             new_file.upload(file_content)
         return new_file
@@ -380,7 +549,26 @@ class File(BaseModel):
         *,
         force: bool = False,
     ) -> File:
-        """Create a File instance from a binary IO stream."""
+        """Create a File instance directly from a binary IO stream.
+
+        By default the data is considered to be in HDF5 format. To
+        use a different format, the extension can be specified. If
+        the name is provided and it contains an extension, it will
+        be considered regardless of the extension parameter.
+
+        Args:
+            data (t.BinaryIO): The in-memory or file-like object containing
+                the file's data.
+            name (str | None): The file name. By default a hash-based name is generated.
+            extension (str): The file extension to use if none is found
+                in the name. Defaults to 'h5'.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
+
+        Returns:
+            File: The File object created from the IO data.
+
+        """
         if not name:
             data.seek(0)
             name = cls._create_hash(data)
@@ -392,35 +580,39 @@ class File(BaseModel):
         if existing_files and not force:
             return existing_files[0]
 
-        # TODO(hendrik): check if the file already exists under the problem
-        # and return it if it does.
-
-        new_file = cls.create(name=name,
-                              size=data.seek(0, 2),
-                              problem=problem)
+        new_file = cls.create(name=name, size=data.seek(0, 2), problem=problem)
         data.seek(0)
         new_file.upload(data)
         return new_file
 
-
     @classmethod
     def model_validate(
-        cls, obj: dict[str, t.Any], *,
+        cls,
+        obj: dict[str, t.Any],
+        *,
         strict: bool | None = None,
         from_attributes: bool | None = None,
         context: t.Any = None,
     ) -> File:
+        """Override model_validate to handle Problem association."""
         obj['problem'] = obj.get('problem', Problem.from_id(obj['problemId']))
-        return super().model_validate(obj, strict=strict,
-                                      from_attributes=from_attributes,
-                                      context=context)
+        return super().model_validate(obj, strict=strict, from_attributes=from_attributes, context=context)
 
     @staticmethod
     def _create_hash(
         file: t.BinaryIO,
-        chunk_size: int = 1024 * 1024,
-    ):
-        """Create a hash of the file content."""
+        chunk_size: int = 1024,
+    ) -> str:
+        """Create a SHA-256 hash of the file content.
+
+        Args:
+            file (BinaryIO): The file-like object to read from.
+            chunk_size (int): The size of chunks read from the file. Defaults to 1 KB.
+
+        Returns:
+            str: The hexadecimal hash string of the file contents.
+
+        """
         hasher = hashlib.sha256()
         while chunk := file.read(chunk_size):
             hasher.update(chunk)

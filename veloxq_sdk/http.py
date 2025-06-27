@@ -3,11 +3,9 @@ import typing as t
 from contextlib import contextmanager
 
 import httpx
-from websockets.sync.client import connect
+from websockets.sync.client import ClientConnection, connect
 
 from veloxq_sdk.config import VeloxQAPIConfig
-
-from websockets.sync.client import ClientConnection
 
 
 class RestClient(httpx.Client):
@@ -44,7 +42,8 @@ class RestClient(httpx.Client):
         """
         token = self.headers.get(self.API_KEY_HEADER)
         if not token:
-            msg = f'Missing required header: {self.API_KEY_HEADER}. Make sure that the token is set in the configuration.'
+            msg = (f'Missing required header: {self.API_KEY_HEADER}.'
+                   ' Make sure that the token is set in the configuration.')
             raise ValueError(msg)
         url = self._merge_url(path).copy_with(
             scheme='wss',

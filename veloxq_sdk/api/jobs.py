@@ -1,11 +1,17 @@
+"""VeloxQ API Jobs Module.
+
+This module provides classes and methods to manage jobs in the VeloxQ API. It includes
+functionality for creating, retrieving, monitoring, and managing job results, logs, and
+associated metadata.
+"""
 from __future__ import annotations
 
-from functools import cached_property
 import json
 import time
 import typing as t
 from datetime import datetime
 from enum import Enum
+from functools import cached_property
 from pathlib import Path
 from tempfile import gettempdir
 
@@ -16,36 +22,83 @@ from veloxq_sdk.api.base import BaseModel, BasePydanticModel
 
 
 class LogCategory(Enum):
-    INFO = "INFO"
-    NOTICE = "NOTICE"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
-    CRITICAL = "CRITICAL"
-    PROGRESS = "PROGRESS"
+    """Enumerate all possible categories for job logs.
+
+    Attributes:
+        INFO (str): Informational messages.
+        NOTICE (str): Notice messages.
+        WARNING (str): Warning messages indicating potential issues.
+        ERROR (str): Error messages for failed operations.
+        CRITICAL (str): Critical errors needing immediate attention.
+        PROGRESS (str): Progress messages to indicate status updates or stages.
+
+    """
+
+    INFO = 'INFO'
+    NOTICE = 'NOTICE'
+    WARNING = 'WARNING'
+    ERROR = 'ERROR'
+    CRITICAL = 'CRITICAL'
+    PROGRESS = 'PROGRESS'
 
 
 class PeriodFilter(Enum):
-    TODAY = "today"
-    YESTERDAY = "yesterday"
-    LAST_WEEK = "lastWeek"
-    LAST_MONTH = "lastMonth"
-    LAST_3_MONTHS = "last3Months"
-    LAST_YEAR = "lastYear"
-    ALL = "all"
+    """Enumerate possible date filters for retrieving jobs.
+
+    Attributes:
+        TODAY (str): Filter to today’s jobs.
+        YESTERDAY (str): Filter to jobs created yesterday.
+        LAST_WEEK (str): Filter to jobs created in the last week.
+        LAST_MONTH (str): Filter to jobs created in the last month.
+        LAST_3_MONTHS (str): Filter to jobs created in the last three months.
+        LAST_YEAR (str): Filter to jobs created in the last year.
+        ALL (str): No date filter (all jobs).
+
+    """
+
+    TODAY = 'today'
+    YESTERDAY = 'yesterday'
+    LAST_WEEK = 'lastWeek'
+    LAST_MONTH = 'lastMonth'
+    LAST_3_MONTHS = 'last3Months'
+    LAST_YEAR = 'lastYear'
+    ALL = 'all'
 
 
 class TimePeriod(Enum):
-    allTime = "allTime"
-    lastHour = "lastHour"
-    last12Hours = "last12Hours"
-    last24Hours = "last24Hours"
-    last3Days = "last3Days"
-    lastWeek = "lastWeek"
-    lastMonth = "lastMonth"
+    """Enumerate different time periods for filtering job logs.
+
+    Attributes:
+        allTime (str): No time filter, retrieves logs from all time.
+        lastHour (str): Logs from the last hour.
+        last12Hours (str): Logs from the last 12 hours.
+        last24Hours (str): Logs from the last 24 hours.
+        last3Days (str): Logs from the last three days.
+        lastWeek (str): Logs from the last week.
+        lastMonth (str): Logs from the last month.
+
+    """
+
+    ALL_TIME = 'allTime'
+    LAST_HOUR = 'lastHour'
+    LAST_12_HOURS = 'last12Hours'
+    LAST_24_HOURS = 'last24Hours'
+    LAST_3_DAYS = 'last3Days'
+    LAST_WEEK = 'lastWeek'
+    LAST_MONTH = 'lastMonth'
 
 
 class JobStatus(Enum):
-    """An enumeration representing the status of a job."""
+    """Enumerate job statuses.
+
+    Attributes:
+        CREATED (str): The job has been created but not yet queued or running.
+        PENDING (str): The job is in line waiting to be processed.
+        RUNNING (str): The job is actively being processed.
+        COMPLETED (str): The job finished successfully.
+        FAILED (str): The job encountered an error and did not complete successfully.
+
+    """
 
     CREATED = 'created'
     PENDING = 'pending'
@@ -55,44 +108,109 @@ class JobStatus(Enum):
 
 
 class JobResultType(Enum):
-    MATRIX = "matrix"
-    DEFAULT = "default"
-    PARALLEL_TEMPERING = "parallelTempering"
+    """Enumerate result types for a job's outcome.
+
+    Attributes:
+        MATRIX (str): Indicates matrix-type result data.
+        DEFAULT (str): Indicates a default or generic result type.
+        PARALLEL_TEMPERING (str): Indicates a result produced by a parallel tempering method.
+
+    """
+
+    MATRIX = 'matrix'
+    DEFAULT = 'default'
+    PARALLEL_TEMPERING = 'parallelTempering'
 
 
 class JobTimelineValue(BasePydanticModel):
+    """Represents a single value on the job timeline.
+
+    Attributes:
+        name (JobStatus): Status name.
+        value (Union[datetime, float]): Timestamp (if event time) or duration in hours (if aggregated).
+
+    """
+
     name: JobStatus
-    value: t.Union[datetime, float] = Field(description="Timestamp or duration in hours")
+    value: t.Union[datetime, float] = Field(description='Timestamp or duration in hours')
 
 
 class JobStatistics(BasePydanticModel):
-    usage_time: float = Field(default=0.0, description="Usage time in hours")
-    pending_time: float = Field(default=0.0, description="Pending time in hours")
-    running_time: float = Field(default=0.0, description="Running time in hours")
-    total_cost: float = Field(default=0.0, description="Total cost in dollars")
-    solver_cost: float = Field(default=0.0, description="Backend cost per hour")
-    backend_cost: float = Field(default=0.0, description="Backend cost per hour")
-    total_backend_cost: float = Field(default=0.0, description="Total backend cost in dollars")
-    total_usage_cost: float = Field(default=0.0, description="Total usage cost in dollars")
+    """Statistical information about a job's execution.
+
+    Attributes:
+        usage_time (float): Amount of usage time in hours.
+        pending_time (float): Time spent in pending state.
+        running_time (float): Time spent running.
+        total_cost (float): Total cost in dollars.
+        solver_cost (float): The solver's hourly cost.
+        backend_cost (float): The backend's hourly cost.
+        total_backend_cost (float): The total backend cost in dollars.
+        total_usage_cost (float): The total usage cost in dollars.
+
+    """
+
+    usage_time: float = Field(default=0.0, description='Usage time in hours')
+    pending_time: float = Field(default=0.0, description='Pending time in hours')
+    running_time: float = Field(default=0.0, description='Running time in hours')
+    total_cost: float = Field(default=0.0, description='Total cost in dollars')
+    solver_cost: float = Field(default=0.0, description='Backend cost per hour')
+    backend_cost: float = Field(default=0.0, description='Backend cost per hour')
+    total_backend_cost: float = Field(default=0.0, description='Total backend cost in dollars')
+    total_usage_cost: float = Field(default=0.0, description='Total usage cost in dollars')
 
 
 class JobResultDataItem(BasePydanticModel):
+    """Data item within a job result metadata, including name, label, and values.
+
+    Attributes:
+        name (str): The data item's name.
+        label (str): A human-readable label.
+        values (List[Union[float, str]]): One or more data points.
+
+    """
+
     name: str
     label: str
     values: t.List[t.Union[float, str]] = []
 
 
 class JobResultData(BasePydanticModel):
+    """metadata about the results of a job execution.
+
+    Attributes:
+        type (JobResultType): Indicator of how the result data is structured.
+        items (List[JobResultDataItem]): A list of result data items.
+
+    """
+
     type: JobResultType
     items: t.List[JobResultDataItem] = []
 
 
 class JobParameterSchema(BasePydanticModel):
+    """Schema for solver's paramteres used (name and value).
+
+    Attributes:
+        name (str): The parameter name.
+        value (Any): The parameter value, which can be any serializable type.
+
+    """
+
     name: str
     value: t.Any
 
 
 class JobLogsRow(BasePydanticModel):
+    """Represents a job log entry.
+
+    Attributes:
+        timestamp (Optional[datetime]): When the log entry was recorded.
+        category (LogCategory): The category of the log message.
+        message (str): The text of the log message.
+
+    """
+
     timestamp: t.Optional[datetime] = None
     category: LogCategory
     message: str
@@ -102,7 +220,18 @@ class JobLogsRow(BasePydanticModel):
 
 
 class Job(BaseModel):
-    """A class representing a job in the VeloxQ API."""
+    """A class representing a job in the VeloxQ API platform.
+
+    Attributes:
+        number (int): The job's short ID displayed (alias for 'shortId').
+        created_at (datetime): The date/time when the job was created.
+        updated_at (datetime): The date/time when the job was last updated.
+        status (JobStatus): The current status of the job (e.g., RUNNING, COMPLETED).
+        statistics (JobStatistics): Execution statistics (time usage, cost, etc.).
+        timeline (List[JobTimelineValue]): A chronological list of status changes.
+        result_metadata (Optional[JobResultData]): Metadata about job results if available.
+
+    """
 
     number: int = Field(alias='shortId', description='The job number.')
     created_at: datetime = Field(
@@ -123,35 +252,32 @@ class Job(BaseModel):
         default_factory=list,
         description='Timeline of the job status changes.',
     )
-    results_statistics: t.Optional[JobResultData] = Field(
+    result_metadata: t.Optional[JobResultData] = Field(
         alias='results',
         default=None,
-        description='Statistics about the results of the job execution.',
+        description='Metadata about the results of the job execution.',
     )
-
-    def __str__(self) -> str:
-        return f'Job(number={self.number}, status={self.status})'
 
     def wait_for_completion(self, timeout: float | None = None) -> None:
         """Wait for the job to complete.
 
         Args:
-            timeout (float | None): The maximum time to wait for completion in seconds.
-                If None, it will wait indefinitely.
+            timeout (float | None): Maximum time in seconds to wait for completion.
+                                    If None, wait indefinitely.
 
         Raises:
-            TimeoutError: If the job does not complete within the specified timeout.
+            TimeoutError: If the job does not complete by 'timeout' seconds.
 
         """
         start_time = time.monotonic()
-        with self.http.open_ws(
-            f'jobs/{self.id}/status-updates',
-        ) as ws:
+        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
             waiting = True
             while waiting:
                 if timeout and (time.monotonic() - start_time) > timeout:
-                    msg = (f'Waiting for Job {self.id} completion timed'
-                        f' out after {timeout} seconds.')
+                    msg = (
+                        f'Waiting for Job {self.id} completion timed '
+                        f'out after {timeout} seconds.'
+                    )
                     raise TimeoutError(msg)
                 message = json.loads(ws.recv())
                 waiting = not message['finished']
@@ -159,18 +285,26 @@ class Job(BaseModel):
     def get_job_logs(
         self,
         category: LogCategory | None = None,
-        time_period: TimePeriod = TimePeriod.allTime,
+        time_period: TimePeriod = TimePeriod.ALL_TIME,
         msg: str | None = None,
     ) -> list[JobLogsRow]:
-        """Get the logs of the job.
+        """Retrieve the logs of this job.
 
         Args:
-            category (category | None): Filter logs by category.
-            time_period (time_period): Filter logs by time period.
-            msg (str | None): Filter logs by message content.
+            category (LogCategory | None): If provided, filters logs by this category.
+            time_period (TimePeriod): Restricts logs to a specific time window (default ALL_TIME).
+            msg (str | None): If provided, filters logs by message substring.
 
         Returns:
-            list[JobLogsRow]: A list of log entries for the job.
+            list[JobLogsRow]: The job's logs matching the filters.
+
+        Usage:
+            ```python
+            job = Job.from_id('job123')
+            logs = job.get_job_logs(category=LogCategory.ERROR, time_period=TimePeriod.LAST_HOUR)
+            for log in logs:
+                print(log)
+            ```
 
         """
         params: dict[str, str] = {'time_period': time_period.value}
@@ -189,17 +323,16 @@ class Job(BaseModel):
         """Get the result of the job.
 
         Returns:
-            JobResult: The result of the job.
+            JobResult: The job's result accessor.
 
         Raises:
-            ValueError: If the job has not completed successfully.
+            RuntimeError: If the job status is not 'completed'.
 
         """
         self.refresh()
-        if self.status != 'completed':
+        if self.status != JobStatus.COMPLETED.value:
             msg = f'Job {self.id} has not completed successfully.'
             raise RuntimeError(msg)
-
         return JobResult(id=self.id)
 
     def refresh(self) -> None:
@@ -213,14 +346,15 @@ class Job(BaseModel):
         created_at: PeriodFilter | None = None,
         limit: int = 1000,
     ) -> list[Job]:
-        """Get all jobs.
+        """Get a list of jobs from the server.
 
         Args:
-            status (JobStatus | None): Filter jobs by status.
-            limit (int): Maximum number of jobs to return.
+            status (JobStatus | None): Filter jobs by this status if provided.
+            created_at (PeriodFilter | None): Filter jobs by creation date (TODAY, YESTERDAY, etc.).
+            limit (int): Maximum number of jobs to return (default 1000).
 
         Returns:
-            list[Job]: A list of jobs.
+            list[Job]: A list of Job objects matching the filters.
 
         """
         params: dict[str, int | str] = {'_page': 1, '_limit': limit}
@@ -235,36 +369,71 @@ class Job(BaseModel):
         return [cls.model_validate(item) for item in data]
 
     @classmethod
-    def from_id(cls, job_id: str) -> Job:
-        """Get a job by its ID."""
+    def from_id(cls, job_id: str) -> "Job":
+        """Get a Job by its ID.
+
+        Args:
+            job_id (str): The ID of the job to retrieve.
+
+        Returns:
+            Job: The matching job object.
+
+        """
         response = cls._http.get(f'jobs/{job_id}')
         response.raise_for_status()
         return cls.model_validate(response.json())
 
 
 class JobResult(BaseModel):
-    """A class representing the result of a job in the VeloxQ API."""
+    """Job result Accessor.
+
+    Provides HDF5-based download and local caching for easy access.
+
+    Usage for downloading:
+        ```python
+        job = Job.from_id('job123')
+        result = job.result  # Access the job's result
+        with open('result.hdf5', 'wb') as f:
+            result.download(f)  # Download the result to a file
+        ```
+    Usage to access data directly:
+        ```python
+        job = Job.from_id('job123')
+        # Access the energies from the result
+        energies = job.result.data['Spectrum']['energies']
+        plt.plot(np.asarray(energies))
+        plt.show()
+        ```
+    """
 
     @property
     def data(self) -> h5py.File:
-        """Get the hdf5 opened file containing the job result."""
+        """HDF5 result file object.
+
+        Retrieve an opened HDF5 file containing the job's result.
+        Downloads the file to a temporary location if not already cached.
+
+        Returns:
+            h5py.File: The results in HDF5 format.
+
+        """
         if not hasattr(self, '_data'):
             self._data = h5py.File(self._get_tempfile(), 'r')
-
         return self._data
 
     def __del__(self) -> None:
-        """Ensure the hdf5 file is closed when the instance is deleted."""
+        """Close the HDF5 file object if it exists."""
         if hasattr(self, '_data'):
             self._data.close()
 
     def _get_tempfile(self) -> Path:
-        """Get the temporary file where the job result is stored.
+        """Get the temporary file path for the job result.
 
-        If the file does not exist or is empty, it will download the result.
+        Return the local Path object pointing to the cached job result. If the file is
+        missing or has zero length, the result is downloaded.
 
         Returns:
-            Path: The path to the temporary file containing the job result.
+            Path: Cached HDF5 file containing the job's result.
 
         """
         temp_file = (Path(gettempdir()) / self.id).with_suffix('.hdf5')
@@ -273,15 +442,15 @@ class JobResult(BaseModel):
 
         with temp_file.open('wb') as f:
             self.download(f)
-
         return temp_file
 
-    def download(self, file: t.BinaryIO, chunk_size: int = 1024*1024) -> None:
-        """Download the result of the job to a file.
+    def download(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
+        """Download the result.
 
         Args:
-            file (t.BinaryIO): The file to write the result to.
-            chunk_size (int): The size of each chunk to read from the response.
+            file (t.BinaryIO): The destination file-like object to write the content to.
+            chunk_size (int): The size (in bytes) of each chunk read from the response. 
+                Default is 1 MB.
 
         """
         with self.http.stream(

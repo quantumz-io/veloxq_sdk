@@ -1,4 +1,34 @@
-"""VeloxQ Client Configuration."""
+"""VeloxQ Client Configuration.
+
+This module provides utilities for configuring the VeloxQ API client.
+It includes classes and functions to manage and load configuration,
+including environment-based overrides and file-based configuration
+(through JSON and Python config files).
+
+Usage Example:
+    from traitlets.config import Config
+    from veloxq_client_config import load_config
+    # Create or update configuration programmatically:
+    c = Config()
+    c.VeloxQAPIConfig.token = "12345678-90ab-cdef-1234-567890abcdef"
+    load_config(c)
+
+Usage with Files:
+    # Load configuration from a file:
+    from veloxq_client_config import load_config
+    load_config("path/to/config.json")
+    # or
+    load_config("path/to/config.py")
+
+Modifying Directly:
+    from veloxq_client_config import VeloxQAPIConfig
+    config = VeloxQAPIConfig.instance()
+    config.url = "https://api.veloxq.com"
+
+Generating Default Config File:
+    from veloxq_client_config import generate_py_config_file
+    generate_py_config_file("veloxq_api_config.py")
+"""
 from __future__ import annotations
 
 import json
@@ -45,7 +75,7 @@ class VeloxQAPIConfig(SingletonConfigurable):
     json_config_loader_class = JSONFileConfigLoader
 
     def __init__(self, **kwargs: t.Any) -> None:
-        """Initialize the APIConfig instance."""
+        """Initialize the VeloxQAPIConfig."""
         super().__init__(**kwargs)
         self.load_config_environ()
 
