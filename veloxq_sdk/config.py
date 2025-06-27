@@ -92,7 +92,7 @@ class VeloxQAPIConfig(SingletonConfigurable):
                 # use __ instead of . as separator in env variable.
                 # Warning, case sensitive !
                 _, *path, key = k.split("__")
-                section = new_config
+                section = new_config['VeloxQAPIConfig']
                 for p in path:
                     section = section[p]
                 setattr(section, key, DeferredConfigString(v))
