@@ -8,14 +8,14 @@ from veloxq_sdk.api.backends import (
 )
 from veloxq_sdk.api.problems import File, Problem
 from veloxq_sdk.api.solvers import (
-    VeloxQ,
+    VeloxQSolver,
     VeloxQParameters,
 )
 
 __all__ = [
     'File',
     'Problem',
-    'VeloxQ',
+    'VeloxQSolver',
     'VeloxQH100_1',
     'VeloxQH100_2',
     'VeloxQParameters',

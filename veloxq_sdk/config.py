@@ -24,10 +24,10 @@ if t.TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-class APIConfig(SingletonConfigurable):
+class VeloxQAPIConfig(SingletonConfigurable):
     """Configuration class for the VeloxQ API client."""
 
-    name = 'veloxq-api'
+    name = 'veloxq-api-sdk'
 
     url = Unicode('https://api-dev.veloxq.com',
                   config=True,
@@ -66,8 +66,6 @@ class APIConfig(SingletonConfigurable):
                 for p in path:
                     section = section[p]
                 setattr(section, key, DeferredConfigString(v))
-
-        new_config.merge(self.config)
         self.update_config(new_config)
 
     def load_config_file(
@@ -86,7 +84,6 @@ class APIConfig(SingletonConfigurable):
                 fname not in self._loaded_config_files
             ):  # only add to list of loaded files if not previously loaded
                 self._loaded_config_files.append(fname)
-        new_config.merge(self.config)
         self.update_config(new_config)
 
     @classmethod
@@ -153,12 +150,13 @@ class APIConfig(SingletonConfigurable):
 
 def load_config(config: ConfigLike) -> None:
     """Load configuration for the VeloxQ API SDK."""
-    api_config = APIConfig.instance()
+    api_config = VeloxQAPIConfig.instance()
 
     if isinstance(config, Config):
         api_config.update_config(config)
     elif isinstance(config, dict):
         api_config.config.merge(config)
+        api_config.update_config(api_config.config)
     elif isinstance(config, Path):
         api_config.load_config_file(config.name, path=str(config.parent))
     elif isinstance(config, str):
@@ -176,13 +174,21 @@ def generate_py_config_file(
     filename: str | Path,
 ) -> None:
     """Generate default config file for the VeloxQ API SDK."""
-    lines = [f'# Configuration file for {APIConfig.name}.']
+    lines = [f'# Configuration file for {VeloxQAPIConfig.name}.']
     lines.append('')
     lines.append('c = get_config()  #' + 'noqa')
     lines.append('')
-    for _, v in sorted(APIConfig.class_traits(config=True).items()):
-        help_str = APIConfig.class_get_trait_help(v)
-        lines.append(f'c.APIConfig.{v.name} = {v.default_value!r}  # {help_str}')
+    for _, v in sorted(VeloxQAPIConfig.class_traits(config=True).items()):
+        config_str = f'c.VeloxQAPIConfig.{v.name} = {v.default_value!r}'
+        lines.append(config_str)
+
+        if help_str := VeloxQAPIConfig.class_get_trait_help(v).splitlines():
+            lines[-1] += f'  # {help_str[0]}'
+            spaces = ' '*len(config_str)
+            lines.extend(
+                f'{spaces}  # {line}' for line in help_str[1:] if line.strip()
+            )
+            lines.append('')
 
     with open(filename, 'w') as f:
         f.write('\n'.join(lines))

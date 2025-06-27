@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import typing as t
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryFile
 
 import h5py
-from numpy import dtype, floating, ndarray
+from numpy import dtype, ndarray
 from pydantic import Field
 
 from veloxq_sdk.api.base import BaseModel
@@ -18,13 +19,14 @@ InstanceLike = t.Union[
     'File',
     Path,
     str,
-    t.BinaryIO,
 ]
 
-BiasesType = t.Union[t.List[float], ndarray[1, dtype[floating]]]
-CouplingType = t.Union[t.List[t.List[float]], ndarray[2, dtype[floating]]]
+BiasesType = t.Union[t.List[float], ndarray]
+CouplingType = t.Union[t.List[t.List[float]], ndarray]
 
 InstanceTuple = t.Tuple[BiasesType, CouplingType]
+
+_logger = logging.getLogger(__name__)
 
 
 class InstanceDict(t.TypedDict):
@@ -50,7 +52,7 @@ class Problem(BaseModel):
         response = self._http.get(f'problems/{self.id}/files',
                                     params=params)
         response.raise_for_status()
-        data = response.json()
+        data = response.json()['data']
         return [File.model_validate(item) for item in data]
 
     def new_file(self, name: str, size: int) -> File:
@@ -64,9 +66,9 @@ class Problem(BaseModel):
         response = cls._http.get('problems',
                                  params={'_page': 1, '_limit': 1, 'q': 'undefined'})
         response.raise_for_status()
-        data = response.json()
+        data = response.json()['data']
         if data:
-            return cls.model_validate(data)
+            return cls.model_validate(data[0])
 
         return cls.create(name='undefined')
 
@@ -87,7 +89,7 @@ class Problem(BaseModel):
 
         response = cls._http.get('problems', params=params)
         response.raise_for_status()
-        data = response.json()
+        data = response.json()['data']
         return [cls.model_validate(item) for item in data]
 
     @classmethod
@@ -115,9 +117,9 @@ class File(BaseModel):
     created_at: datetime = Field(
         description="The date and time when the file was created.",
     )
-    uploaded_at: datetime | None = Field(
+    updated_at: t.Optional[datetime] = Field(
         default=None,
-        description="The date and time when the file was uploaded.",
+        description="The date and time when the file was updated.",
     )
     status: str = Field(
         description="The status of the file upload.",
@@ -135,7 +137,7 @@ class File(BaseModel):
     def download(self, file: t.BinaryIO, chunk_size: int = 1024*1024) -> None:
         """Download the file content."""
         download_url = self.http.get(
-            f'problems/{self.problem.id}/files/{self.id}/download',
+            f'problems/{self.problem.id}/files/{self.id}',
         )
         download_url.raise_for_status()
         with self.http.stream(
@@ -159,10 +161,10 @@ class File(BaseModel):
 
     def refresh(self) -> None:
         """Refresh the file data from the API."""
-        response = self._http.get(f'problems/{self.problem.id}/files/{self.id}',
-                                  params={'_page': 1, '_limit': 1})
+        response = self._http.get(f'problems/{self.problem.id}/files',
+                                  params={'_page': 1, '_limit': 1, 'q': self.id})
         response.raise_for_status()
-        data = response.json()[0]
+        data = response.json()['data'][0]
         self.model_update(data)
 
     @classmethod
@@ -191,7 +193,7 @@ class File(BaseModel):
         response = cls._http.get('files',
                                  params=params)
         response.raise_for_status()
-        data = response.json()
+        data = response.json()['data']
         return [cls.model_validate(item) for item in data]
 
     @classmethod
@@ -231,13 +233,6 @@ class File(BaseModel):
             )
         if isinstance(instance, tuple):
             return cls.from_tuple(
-                data=instance,
-                name=name,
-                problem=problem,
-                force=force,
-            )
-        if isinstance(instance, t.BinaryIO):
-            return cls.from_io(
                 data=instance,
                 name=name,
                 problem=problem,
@@ -298,8 +293,12 @@ class File(BaseModel):
     ) -> File:
         """Create a File instance from an Ising model."""
 
-        if name and not force and (existing_files := cls.get_files(name=name, limit=1)):
-            return existing_files[0]
+        if name:
+            if (ext_idx := name.find('.')) != -1:
+                name = name[:ext_idx]
+            name += '.h5'
+            if not force and (existing_files := cls.get_files(name=name, limit=1)):
+                return existing_files[0]
 
         with TemporaryFile() as temp_file:
             with h5py.File(temp_file, 'w') as h5file:
@@ -310,7 +309,7 @@ class File(BaseModel):
             temp_file_size = temp_file.tell()
             temp_file.seek(0)
 
-            name = name or cls._create_hash(temp_file)
+            name = name or (cls._create_hash(temp_file) + '.h5')
             temp_file.seek(0)
 
             # TODO(hendrik): check if the file already exists under the problem
@@ -336,6 +335,8 @@ class File(BaseModel):
         force: bool = False,
     ) -> File:
         """Create a File instance from a file path.
+
+        The name or path must contain the file extension.
 
         Uploads the file content to the API and returns a File instance.
 
@@ -374,6 +375,7 @@ class File(BaseModel):
         cls,
         data: t.BinaryIO,
         name: str | None = None,
+        extension: str = 'h5',
         problem: Problem | None = None,
         *,
         force: bool = False,
@@ -382,6 +384,9 @@ class File(BaseModel):
         if not name:
             data.seek(0)
             name = cls._create_hash(data)
+
+        if name.find('.') == -1:
+            name += f'.{extension}'
 
         existing_files = cls.get_files(name=name, limit=1)
         if existing_files and not force:
@@ -405,7 +410,7 @@ class File(BaseModel):
         from_attributes: bool | None = None,
         context: t.Any = None,
     ) -> File:
-        obj['problem'] = obj.get('problem', Problem.from_id(obj['problem_id']))
+        obj['problem'] = obj.get('problem', Problem.from_id(obj['problemId']))
         return super().model_validate(obj, strict=strict,
                                       from_attributes=from_attributes,
                                       context=context)

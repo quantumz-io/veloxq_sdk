@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cached_property
 import json
 import time
 import typing as t
@@ -9,10 +10,9 @@ from pathlib import Path
 from tempfile import gettempdir
 
 import h5py
-from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from veloxq_sdk.api.base import BaseModel
+from veloxq_sdk.api.base import BaseModel, BasePydanticModel
 
 
 class LogCategory(Enum):
@@ -60,12 +60,12 @@ class JobResultType(Enum):
     PARALLEL_TEMPERING = "parallelTempering"
 
 
-class JobTimelineValue(PydanticBaseModel):
+class JobTimelineValue(BasePydanticModel):
     name: JobStatus
-    value: datetime | float
+    value: t.Union[datetime, float] = Field(description="Timestamp or duration in hours")
 
 
-class JobStatistics(PydanticBaseModel):
+class JobStatistics(BasePydanticModel):
     usage_time: float = Field(default=0.0, description="Usage time in hours")
     pending_time: float = Field(default=0.0, description="Pending time in hours")
     running_time: float = Field(default=0.0, description="Running time in hours")
@@ -76,24 +76,24 @@ class JobStatistics(PydanticBaseModel):
     total_usage_cost: float = Field(default=0.0, description="Total usage cost in dollars")
 
 
-class JobResultDataItem(PydanticBaseModel):
+class JobResultDataItem(BasePydanticModel):
     name: str
     label: str
-    values: list[float | str] = []
+    values: t.List[t.Union[float, str]] = []
 
 
-class JobResultData(PydanticBaseModel):
+class JobResultData(BasePydanticModel):
     type: JobResultType
-    items: list[JobResultDataItem] = []
+    items: t.List[JobResultDataItem] = []
 
 
-class JobParameterSchema(PydanticBaseModel):
+class JobParameterSchema(BasePydanticModel):
     name: str
     value: t.Any
 
 
-class JobLogsRow(PydanticBaseModel):
-    timestamp: datetime | None = None
+class JobLogsRow(BasePydanticModel):
+    timestamp: t.Optional[datetime] = None
     category: LogCategory
     message: str
 
@@ -104,7 +104,7 @@ class JobLogsRow(PydanticBaseModel):
 class Job(BaseModel):
     """A class representing a job in the VeloxQ API."""
 
-    number: int = Field(alias='short_id', description='The job number.')
+    number: int = Field(alias='shortId', description='The job number.')
     created_at: datetime = Field(
         description='The date and time when the job was created.',
     )
@@ -119,7 +119,7 @@ class Job(BaseModel):
         default_factory=JobStatistics,
         description='Statistics about the job execution.',
     )
-    timeline: list[JobTimelineValue] = Field(
+    timeline: t.List[JobTimelineValue] = Field(
         default_factory=list,
         description='Timeline of the job status changes.',
     )
@@ -184,7 +184,7 @@ class Job(BaseModel):
         data = response.json()
         return [JobLogsRow.model_validate(item) for item in data]
 
-    @property
+    @cached_property
     def result(self) -> JobResult:
         """Get the result of the job.
 
@@ -231,7 +231,7 @@ class Job(BaseModel):
 
         response = cls._http.get('jobs', params=params)
         response.raise_for_status()
-        data = response.json()
+        data = response.json()['data']
         return [cls.model_validate(item) for item in data]
 
     @classmethod

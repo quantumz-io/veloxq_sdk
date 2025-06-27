@@ -5,10 +5,9 @@ from contextlib import contextmanager
 import httpx
 from websockets.sync.client import connect
 
-from veloxq_sdk.config import APIConfig
+from veloxq_sdk.config import VeloxQAPIConfig
 
-if t.TYPE_CHECKING:
-    from websockets.sync.client import ClientConnection
+from websockets.sync.client import ClientConnection
 
 
 class RestClient(httpx.Client):
@@ -17,11 +16,20 @@ class RestClient(httpx.Client):
     API_KEY_HEADER = 'x-veloxq-auth-key'
 
     def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
-        self.config = APIConfig.instance()
-        headers = {
-            self.API_KEY_HEADER: self.config.token,
-        }
-        super().__init__(*args, **kwargs, base_url = self.config.url, headers = headers)
+        super().__init__(*args, **kwargs)
+        config = VeloxQAPIConfig.instance()
+        config.observe(self._update_token, names='token')
+        config.observe(self._update_url, names='url')
+        self.headers[self.API_KEY_HEADER] = config.token
+        self.base_url = config.url
+
+    def _update_token(self, change: dict) -> None:
+        """Update the API token in the headers."""
+        self.headers[self.API_KEY_HEADER] = change['new']
+
+    def _update_url(self, change: dict) -> None:
+        """Update the base URL in the client."""
+        self.base_url = change['new']
 
     @contextmanager
     def open_ws(self, path: str) -> t.Iterator[ClientConnection]:
@@ -34,9 +42,16 @@ class RestClient(httpx.Client):
             connect: A WebSocket connection object.
 
         """
-        url = httpx.URL(self._merge_url(path), params={
-            self.API_KEY_HEADER: self.config.token,
-        })
+        token = self.headers.get(self.API_KEY_HEADER)
+        if not token:
+            msg = f'Missing required header: {self.API_KEY_HEADER}. Make sure that the token is set in the configuration.'
+            raise ValueError(msg)
+        url = self._merge_url(path).copy_with(
+            scheme='wss',
+            params={
+               self.API_KEY_HEADER: token,
+            }
+        )
         with connect(str(url)) as ws:
             yield ws  # type: ignore[return]
 

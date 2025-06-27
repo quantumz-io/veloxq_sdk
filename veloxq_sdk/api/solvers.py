@@ -41,7 +41,7 @@ class BaseSolver(BaseModel):
                 'backendId': self.backend.id,
                 'files': [ { 'fileId': file.id } ],
                 'parameters': self.parameters.model_dump(
-                    mode='json', by_alias=True, exclude_unset=True,
+                    mode='json',
                 ),
             }],
         }
@@ -68,10 +68,10 @@ class VeloxQParameters(PydanticBaseModel):
     )
 
 
-class VeloxQ(BaseSolver):
+class VeloxQSolver(BaseSolver):
     """The VeloxQ solver."""
 
-    _id = '3bce1dfa-e7af-4040-a283-67cff253cf94'
+    id: str = '3bce1dfa-e7af-4040-a283-67cff253cf94'
 
     backend: BaseBackend = Field(
         default=VeloxQH100_1(),

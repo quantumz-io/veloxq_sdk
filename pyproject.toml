@@ -59,3 +59,6 @@ inline-quotes = "single"
 
 [tool.ruff.lint.flake8-annotations]
 mypy-init-return = false
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
