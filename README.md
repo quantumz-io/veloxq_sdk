@@ -6,39 +6,40 @@ This project provides a configurable Python client interface for submitting and 
 
 ## Table of Contents
 
-1. [Installation & Setup](#1-installation--setup)
-2. [Configuration](#2-configuration)
-   - [2.1 Environment Variables](#21-environment-variables)
-   - [2.2 File-Based Configuration](#22-file-based-configuration)
-   - [2.3 Generating a Default Configuration](#23-generating-a-default-configuration)
-   - [2.4 Live Updates to Configuration](#24-live-updates-to-configuration)
-3. [Selecting Solvers & Backends](#3-selecting-solvers--backends)
-   - [3.1 Default Solver: VeloxQSolver](#31-default-solver-veloxqsolver)
-   - [3.2 Backend Options](#32-backend-options)
-   - [3.3 Setting Solver Parameters](#33-setting-solver-parameters)
-4. [Defining Problems & Files](#4-defining-problems--files)
-   - [4.1 Managing Problems](#41-managing-problems)
-   - [4.2 Creating Files from Different Sources](#42-creating-files-from-different-sources)
-     - [4.2.1 From a Local File Path](#421-from-a-local-file-path)
-     - [4.2.2 From Dictionaries of Biases and Couplings](#422-from-dictionaries-of-biases-and-couplings)
-     - [4.2.3 From Biases and Couplings in Various Formats](#423-from-biases-and-couplings-in-various-formats)
-     - [4.2.4 From Direct I/O Stream (In-Memory Data)](#424-from-direct-io-stream-in-memory-data)
-     - [4.2.5 Using an Existing File Object](#425-using-an-existing-file-object)
-   - [4.3 Uploading & Overwriting Files](#43-uploading--overwriting-files)
-   - [4.4 Associating with Problems](#44-associating-with-problems)
-   - [4.5 Downloading Files](#45-downloading-files)
-5. [Submitting Jobs](#5-submitting-jobs)
-   - [5.1 One-Line Solve Workflow](#51-one-line-solve-workflow)
-   - [5.2 Separate Submission](#52-separate-submission)
-6. [Retrieving & Managing Jobs](#6-retrieving--managing-jobs)
-   - [6.1 Waiting for Completion](#61-waiting-for-completion)
-   - [6.2 Listing Jobs](#62-listing-jobs)
-     - [6.2.1 Filtering by Status or Creation Time](#621-filtering-by-status-or-creation-time)
-   - [6.3 Retrieving Job by ID](#63-retrieving-job-by-id)
-   - [6.4 Getting Job Logs](#64-getting-job-logs)
-7. [Accessing Results](#7-accessing-results)
-   - [7.1 Direct Access via HDF5](#71-direct-access-via-hdf5)
-   - [7.2 Downloading the Result File](#72-downloading-the-result-file)
+- [VeloxQ SDK: Documentation \& Usage Guide](#veloxq-sdk-documentation--usage-guide)
+  - [Table of Contents](#table-of-contents)
+  - [1. Installation \& Setup](#1-installation--setup)
+  - [2. Quickstart](#2-quickstart)
+  - [3. Configuration](#3-configuration)
+    - [3.1 Environment Variables](#31-environment-variables)
+    - [3.2 File-Based Configuration](#32-file-based-configuration)
+    - [3.3 Generating a Default Configuration](#33-generating-a-default-configuration)
+    - [3.4 Live Updates to Configuration](#34-live-updates-to-configuration)
+  - [4. Selecting Solvers \& Backends](#4-selecting-solvers--backends)
+    - [4.1 Default Solver: VeloxQSolver](#41-default-solver-veloxqsolver)
+    - [4.2 Backend Options](#42-backend-options)
+    - [4.3 Setting Solver Parameters](#43-setting-solver-parameters)
+  - [5. Defining Problems \& Files](#5-defining-problems--files)
+    - [5.1 Managing Problems](#51-managing-problems)
+    - [5.2 Creating Files from Different Sources](#52-creating-files-from-different-sources)
+      - [5.2.1 From a Local File Path](#521-from-a-local-file-path)
+      - [5.2.2 From Dictionaries of Biases and Couplings](#522-from-dictionaries-of-biases-and-couplings)
+      - [5.2.3 From Biases and Couplings in Various Formats](#523-from-biases-and-couplings-in-various-formats)
+      - [4.2.4 From Direct I/O Stream (In-Memory Data)](#424-from-direct-io-stream-in-memory-data)
+      - [5.2.5 Using an Existing File Object](#525-using-an-existing-file-object)
+    - [5.3 Uploading \& Overwriting Files](#53-uploading--overwriting-files)
+    - [5.4 Associating with Problems](#54-associating-with-problems)
+    - [5.5 Downloading Files](#55-downloading-files)
+  - [6. Submitting Jobs](#6-submitting-jobs)
+  - [7. Retrieving \& Managing Jobs](#7-retrieving--managing-jobs)
+    - [7.1 Waiting for Completion](#71-waiting-for-completion)
+    - [7.2 Listing Jobs](#72-listing-jobs)
+      - [7.2.1 Filtering by Status or Creation Time](#721-filtering-by-status-or-creation-time)
+    - [7.3 Retrieving Job by ID](#73-retrieving-job-by-id)
+    - [7.4 Getting Job Logs](#74-getting-job-logs)
+  - [8. Accessing Results](#8-accessing-results)
+    - [8.1 Direct Access via HDF5](#81-direct-access-via-hdf5)
+    - [8.2 Downloading the Result File](#82-downloading-the-result-file)
 
 ---
 
@@ -47,382 +48,17 @@ This project provides a configurable Python client interface for submitting and 
 Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.8+:
 
 ```shell
+git clone git@github.com:quantumz-io/veloxq_sdk.git
 pip install .
 ```
 
 ---
 
-## 2. Configuration
-
-The VeloxQ client uses a global singleton configuration via the `VeloxQAPIConfig` class. This configuration can be applied in three ways:
-
-- **Environment variables**
-- **File-based configuration (Python or JSON)**
-- **Direct programmatic modifications**
-
-Since `VeloxQAPIConfig` is a **singleton**, the entire Python process shares one configuration (URL, token, etc.). If you need multiple independent configurations, spawn multiple processes and configure each process individually.
-
-> **Note:** The only configuration variable not set by default is the **token**. It **must be configured** for authentication on the VeloxQ API platform.
-
-### 2.1 Environment Variables
-
-Environment variables allow you to override configuration for the session. There are currently two variables:
-
-- `VELOX_TOKEN`: Updates the token authentication.
-- `VELOXQ_API_URL`: Updates the base URL used to connect to the API.
-
-Example usage:
-
-```shell
-export VELOX_TOKEN="12345678-90ab-cdef-1234-567890abcdef"
-```
-
-When your Python code runs, these variables are automatically loaded. This configuration is used as the base, and extra configuration will be merged on top.
-
-### 2.2 File-Based Configuration
-
-It's possible to load configuration from files in Python or JSON format. For instance:
-
-```python
-from veloxq_sdk.config import load_config
-
-# JSON:
-load_config("path/to/config.json")
-
-# Python:
-load_config("path/to/config.py")
-```
-
-Within a `.py` configuration file, you typically define a `c` object:
-
-```python
-c = get_config()
-c.VeloxQAPIConfig.token = "12345678-90ab-cdef-1234-567890abcdef"
-```
-
-### 2.3 Generating a Default Configuration
-
-Developers can quickly generate a starter Python config file:
-
-```python
-from veloxq_sdk.config import generate_py_config_file
-
-generate_py_config_file("veloxq_api_config.py")
-```
-
-The auto-generated file includes default attributes and docstrings for easy customization.
-
-### 2.4 Live Updates to Configuration
-
-Because the configuration is a singleton (`VeloxQAPIConfig`), changes are global to the running session. For example:
-
-```python
-from veloxq_sdk.config import VeloxQAPIConfig
-
-api_config = VeloxQAPIConfig.instance()
-api_config.token = "NEW_TOKEN_VALUE"
-```
-
-All subsequent calls to the VeloxQ API will reflect this change.
-
----
-
-## 3. Selecting Solvers & Backends
-
-### 3.1 Default Solver: VeloxQSolver
-
-The primary solver in this package is `VeloxQSolver`. It inherits from a more generic `BaseSolver` class and comes preconfigured with:
-
-- Default backend: `VeloxQH100_1` (representing an H100 GPU-based backend)
-- Default parameters (see below)
-
-Instantiation example:
-
-```python
-from veloxq_sdk import VeloxQSolver
-
-solver = VeloxQSolver()
-```
-
-### 3.2 Backend Options
-
-Two common backends included in this SDK:
-
-- `VeloxQH100_1`: Single GPU
-- `VeloxQH100_2`: Dual GPUs
-
-You can override a solver’s backend:
-
-```python
-from veloxq_sdk import VeloxQH100_2
-
-solver.backend = VeloxQH100_2()
-```
-
-### 3.3 Setting Solver Parameters
-
-`VeloxQParameters` defines:
-
-- `num_rep` (default=4096)
-- `num_steps` (default=10000)
-- `timeout` (default=30 seconds)
-
-Example:
-
-**Configure after solver selected:**
-
-```python
-solver.parameters.num_rep = 2048
-solver.parameters.timeout = 45
-```
-
-**Configure before selecting the solver:**
-
-```python
-params = VeloxQParameters(timeout=4000)
-
-solver1 = VeloxQSolver(parameters=params)
-solver2 = VeloxQSolver(parameters=params, backend=VeloxQH100_2())
-```
-
-These parameters are transmitted to the VeloxQ API upon problem submission.
-
----
-
-## 4. Defining Problems & Files
-
-In VeloxQ, "problems" are logical groupings (e.g., "Experiment1" or "Undefined") that hold one or more "files." A "file" is the actual container for your data-for instance, Ising-model parameters, system configurations, or any other simulation input. This section describes how to manage these objects through the VeloxQ SDK.
-
-### 4.1 Managing Problems
-
-A `Problem` groups related files and can be created or retrieved by name:
-
-1. **Create a new `Problem`:**
-
-   ```python
-   from veloxq_sdk.api.problems import Problem
-
-   # Create a problem named "my_experiment":
-   my_problem = Problem.create(name="my_experiment")
-   print(my_problem.id, my_problem.name)
-   ```
-
-2. **Retrieve existing `Problem`s by name (supports partial match):**
-
-   ```python
-   problems = Problem.get_problems(name="my_experiment", limit=5)  # Filter problems containing name
-   for p in problems:
-       print(p.id, p.name)
-   ```
-
-3. **Access the default "undefined" `Problem`:**
-
-   ```python
-   default_problem = Problem.undefined()
-   files = Problem.get_files(name="big_test", limit=5)  # Get files associated with problem
-   print(files)
-   ```
-
----
-
-### 4.2 Creating Files from Different Sources
-
-Files are where your actual data is stored. You can create them from several input types. Once a file is created and uploaded, it remains on the VeloxQ platform until deleted.
-
-> **Note:** By default, if a file with the same name (within the same problem) already exists, the SDK will return that existing file unless you set `force=True` to overwrite it.
-
-#### 4.2.1 From a Local File Path
-
-Useful if you have an existing file in your filesystem (e.g., `.h5`, `.csv`, `.txt`, etc.).
-
-```python
-from veloxq_sdk import File
-
-# Suppose "my_problem" is a Problem instance
-file_obj = File.from_instance(
-    "path/to/local_data.h5",
-    name="my_data.h5",        # Optional; defaults to the file’s basename
-    problem=my_problem,       # Optional; defaults to Problem.undefined()
-    force=True                # Overwrite if a file with the same name exists
-)
-```
-
-#### 4.2.2 From Dictionaries of Biases and Couplings
-
-Create a `File` directly from biases and couplings defined as dictionaries. This is especially useful for sparse Ising models.
-
-```python
-biases = {0: 1.0, 2: -1.0}  # Variable indices mapped to bias values
-couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to couplings values
-
-file_obj = File.from_instance((biases, couplings), name="sparse_ising.h5")
-```
-
-Or using keyword arguments:
-
-```python
-file_obj = File.from_instance(biases=biases, couplings=couplings, name="sparse_ising.h5")
-```
-
-This internally generates a temporary HDF5 file and uploads it.
-
-#### 4.2.3 From Biases and Couplings in Various Formats
-
-You can create a `File` directly from `biases` and `couplings`. These can be provided as lists, NumPy arrays, or dictionaries.
-
-**Example using lists:**
-
-```python
-biases = [1, 0, -2]
-couplings = [
-    [0,  1,  0],
-    [1,  0, -1],
-    [0, -1,  0]
-]
-file_obj = File.from_instance((biases, couplings))
-```
-
-**Example using NumPy arrays:**
-
-```python
-import numpy as np
-
-biases = np.array([1, 0, -2])
-couplings = np.array([
-    [0,  1,  0],
-    [1,  0, -1],
-    [0, -1,  0]
-])
-file_obj = File.from_instance((biases, couplings))
-```
-
-**Example using dictionaries (sparse data):**
-
-```python
-biases = {0: 1.0, 2: -2.0}
-couplings = {(0, 1): 1.0, (2, 1): -1.0}
-file_obj = File.from_instance((biases, couplings))
-```
-
-Or using keyword arguments:
-
-```python
-file_obj = File.from_instance(biases=biases, couplings=couplings)
-```
-
-This internally generates a temporary HDF5 file and uploads it.
-
-> **Note:**
-> Accepted types for `biases` include:
-> - List of floats
-> - NumPy 1D arrays
-> - Dictionaries mapping variable indices to floats
->
-> Accepted types for `couplings` include:
-> - List of lists (2D array) of floats
-> - NumPy 2D arrays
-> - Dictionaries mapping tuples of variable indices to floats
-
-#### 4.2.4 From Direct I/O Stream (In-Memory Data)
-
-```python
-import io
-
-# Suppose 'buffer' is a BytesIO object containing HDF5 or CSV data
-buffer = io.BytesIO(b"...")
-file_obj = File.from_io(
-    data=buffer,
-    name="uploaded_data.h5",  # Will automatically append .h5 if omitted
-    problem=my_problem
-)
-```
-
-#### 4.2.5 Using an Existing File Object
-
-If you have already created/retrieved a `File` object, simply pass it directly:
-
-```python
-existing_file_obj = File.get_files(name="my_data.h5", limit=1)[0]
-file_obj = File.from_instance(existing_file_obj)
-# 'file_obj' points to the same underlying file
-```
-
-### 4.3 Uploading & Overwriting Files
-
-Every method above that "creates" a `File` also performs an upload if the underlying data is not already in VeloxQ:
-
-- When you call `from_instance(...)`, `from_path(...)`, `from_dict(...)`, etc., the file is uploaded automatically.
-- If you re-use the same `name` without setting `force=True`, you’ll get the existing file object without uploading again.
-
-**Example of explicitly forcing an overwrite:**
-
-```python
-file_obj = File.from_instance(
-    "path/to/updated_data.csv",
-    name="my_data.csv",
-    force=True    # Force overwrite if "my_data.csv" already exists
-)
-```
-
-### 4.4 Associating with Problems
-
-To group files under a specific `Problem`, pass a `Problem` object to the creation method:
-
-```python
-my_problem = Problem.create("Experiment_Batch5")
-
-file_obj = File.from_instance(
-    "path/to/local_data.csv",
-    problem=my_problem
-)
-assert file_obj.problem.id == my_problem.id
-```
-
-Or alternately:
-
-```python
-my_problem = Problem.create("Experiment_Batch5")
-
-file_obj = my_problem.new_file(
-    name="big_ising.h5",
-    size=300000
-)
-with open("big_ising.h5", "rb") as f:
-    file_obj.upload(f)
-
-assert file_obj.problem.id == my_problem.id
-```
-
-This ensures that retrieving files for "Experiment_Batch5" will include "local_data.csv".
-
-### 4.5 Downloading Files
-
-1. **Retrieve a file by name:**
-
-   ```python
-   # Returns a list of matching files (max=5 in this example)
-   file_list = File.get_files(name="my_data.csv", limit=5)
-   for f in file_list:
-       print(f.id, f.name, f.status, f.problem.name)
-   ```
-
-2. **Download the file content:**
-
-   ```python
-   # Suppose you have an existing File object
-   with open("local_copy.h5", "wb") as outfile:
-       file_obj.download(outfile)
-   ```
-
----
-
-## 5. Submitting Jobs
-
-### 5.1 One-Line Solve Workflow
+## 2. Quickstart
 
 The simplest approach is using `solver.sample(...)`, which:
 
-1. Creates a `File` for your problem instance (biases and couplings defined as lists, NumPy arrays, dictionaries, file paths, etc.).
+1. Creates a `File` (see below) for your problem instance (biases and couplings defined as lists, NumPy arrays, dictionaries, file paths, etc.).
 2. Automatically submits a job to the VeloxQ platform.
 3. Waits until completion.
 4. Returns the job result.
@@ -511,7 +147,373 @@ result = solver.sample(instance_data)
 print(result.data["Spectrum"]["energies"][:])
 ```
 
-### 5.2 Separate Submission
+---
+
+## 3. Configuration
+
+The VeloxQ client uses a global singleton configuration via the `VeloxQAPIConfig` class. This configuration can be applied in three ways:
+
+- **Environment variables**
+- **File-based configuration (Python or JSON)**
+- **Direct programmatic modifications**
+
+Since `VeloxQAPIConfig` is a **singleton**, the entire Python process shares one configuration (URL, token, etc.). If you need multiple independent configurations, spawn multiple processes and configure each process individually.
+
+> **Note:** The only configuration variable not set by default is the **token**. It **must be configured** for authentication on the VeloxQ API platform.
+
+### 3.1 Environment Variables
+
+Environment variables allow you to override configuration for the session. There are currently two variables:
+
+- `VELOX_TOKEN`: Updates the token authentication.
+- `VELOXQ_API_URL`: Updates the base URL used to connect to the API.
+
+Example usage:
+
+```shell
+export VELOX_TOKEN="12345678-90ab-cdef-1234-567890abcdef"
+```
+
+When your Python code runs, these variables are automatically loaded. This configuration is used as the base, and extra configuration will be merged on top.
+
+### 3.2 File-Based Configuration
+
+It's possible to load configuration from files in Python or JSON format. For instance:
+
+```python
+from veloxq_sdk.config import load_config
+
+# JSON:
+load_config("path/to/config.json")
+
+# Python:
+load_config("path/to/config.py")
+```
+
+Within a `.py` configuration file, you typically define a `c` object:
+
+```python
+c = get_config()
+c.VeloxQAPIConfig.token = "12345678-90ab-cdef-1234-567890abcdef"
+```
+
+### 3.3 Generating a Default Configuration
+
+Developers can quickly generate a starter Python config file:
+
+```python
+from veloxq_sdk.config import generate_py_config_file
+
+generate_py_config_file("veloxq_api_config.py")
+```
+
+The auto-generated file includes default attributes and docstrings for easy customization.
+
+### 3.4 Live Updates to Configuration
+
+Because the configuration is a singleton (`VeloxQAPIConfig`), changes are global to the running session. For example:
+
+```python
+from veloxq_sdk.config import VeloxQAPIConfig
+
+api_config = VeloxQAPIConfig.instance()
+api_config.token = "NEW_TOKEN_VALUE"
+```
+
+All subsequent calls to the VeloxQ API will reflect this change.
+
+---
+
+## 4. Selecting Solvers & Backends
+
+### 4.1 Default Solver: VeloxQSolver
+
+The primary solver in this package is `VeloxQSolver`. It inherits from a more generic `BaseSolver` class and comes preconfigured with:
+
+- Default backend: `VeloxQH100_1` (representing an H100 GPU-based backend)
+- Default parameters (see below)
+
+Instantiation example:
+
+```python
+from veloxq_sdk import VeloxQSolver
+
+solver = VeloxQSolver()
+```
+
+### 4.2 Backend Options
+
+Two common backends included in this SDK:
+
+- `VeloxQH100_1`: Single GPU
+- `VeloxQH100_2`: Dual GPUs
+
+You can override a solver’s backend:
+
+```python
+from veloxq_sdk import VeloxQH100_2
+
+solver.backend = VeloxQH100_2()
+```
+
+### 4.3 Setting Solver Parameters
+
+`VeloxQParameters` defines:
+
+- `num_rep` (default=4096)
+- `num_steps` (default=5000)
+- `timeout` (default=60 seconds)
+
+Example:
+
+**Configure after solver selected:**
+
+```python
+solver.parameters.num_rep = 2048
+solver.parameters.timeout = 45
+```
+
+**Configure before selecting the solver:**
+
+```python
+params = VeloxQParameters(timeout=4000)
+
+solver1 = VeloxQSolver(parameters=params)
+solver2 = VeloxQSolver(parameters=params, backend=VeloxQH100_2())
+```
+
+These parameters are transmitted to the VeloxQ API upon problem submission.
+
+---
+
+## 5. Defining Problems & Files
+
+In VeloxQ, "problems" are logical groupings (e.g., "Experiment1" or "Undefined") that hold one or more "files." A "file" is the actual container for your data-for instance, Ising-model parameters, system configurations, or any other simulation input. This section describes how to manage these objects through the VeloxQ SDK.
+
+### 5.1 Managing Problems
+
+A `Problem` groups related files and can be created or retrieved by name:
+
+1. **Create a new `Problem`:**
+
+   ```python
+   from veloxq_sdk.api.problems import Problem
+
+   # Create a problem named "my_experiment":
+   my_problem = Problem.create(name="my_experiment")
+   print(my_problem.id, my_problem.name)
+   ```
+
+2. **Retrieve existing `Problem`s by name (supports partial match):**
+
+   ```python
+   problems = Problem.get_problems(name="my_experiment", limit=5)  # Filter problems containing name
+   for p in problems:
+       print(p.id, p.name)
+   ```
+
+3. **Access the default "undefined" `Problem`:**
+
+   ```python
+   default_problem = Problem.undefined()
+   files = Problem.get_files(name="big_test", limit=5)  # Get files associated with problem
+   print(files)
+   ```
+
+---
+
+### 5.2 Creating Files from Different Sources
+
+Files are where your actual data is stored. You can create them from several input types. Once a file is created and uploaded, it remains on the VeloxQ platform until deleted.
+
+> **Note:** By default, if a file with the same name (within the same problem) already exists, the SDK will return that existing file unless you set `force=True` to overwrite it.
+
+#### 5.2.1 From a Local File Path
+
+Useful if you have an existing file in your filesystem (e.g., `.h5`, `.csv`, `.txt`, etc.).
+
+```python
+from veloxq_sdk import File
+
+# Suppose "my_problem" is a Problem instance
+file_obj = File.from_instance(
+    "path/to/local_data.h5",
+    name="my_data.h5",        # Optional; defaults to the file’s basename
+    problem=my_problem,       # Optional; defaults to Problem.undefined()
+    force=True                # Overwrite if a file with the same name exists
+)
+```
+
+#### 5.2.2 From Dictionaries of Biases and Couplings
+
+Create a `File` directly from biases and couplings defined as dictionaries. This is especially useful for sparse Ising models.
+
+```python
+biases = {0: 1.0, 2: -1.0}  # Variable indices mapped to bias values
+couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to couplings values
+
+file_obj = File.from_instance((biases, couplings), name="sparse_ising.h5")
+```
+
+Or using keyword arguments:
+
+```python
+file_obj = File.from_instance(biases=biases, couplings=couplings, name="sparse_ising.h5")
+```
+
+This internally generates a temporary HDF5 file and uploads it.
+
+#### 5.2.3 From Biases and Couplings in Various Formats
+
+You can create a `File` directly from `biases` and `couplings`. These can be provided as lists, NumPy arrays, or dictionaries.
+
+**Example using lists:**
+
+```python
+biases = [1, 0, -2]
+couplings = [
+    [0,  1,  0],
+    [1,  0, -1],
+    [0, -1,  0]
+]
+file_obj = File.from_instance((biases, couplings))
+```
+
+**Example using NumPy arrays:**
+
+```python
+import numpy as np
+
+biases = np.array([1, 0, -2])
+couplings = np.array([
+    [0,  1,  0],
+    [1,  0, -1],
+    [0, -1,  0]
+])
+file_obj = File.from_instance((biases, couplings))
+```
+
+**Example using dictionaries (sparse data):**
+
+```python
+biases = {0: 1.0, 2: -2.0}
+couplings = {(0, 1): 1.0, (2, 1): -1.0}
+file_obj = File.from_instance((biases, couplings))
+```
+
+Or using keyword arguments:
+
+```python
+file_obj = File.from_instance(biases=biases, couplings=couplings)
+```
+
+This internally generates a temporary HDF5 file and uploads it.
+
+> **Note:**
+> Accepted types for `biases` include:
+> - List of floats
+> - NumPy 1D arrays
+> - Dictionaries mapping variable indices to floats
+>
+> Accepted types for `couplings` include:
+> - List of lists (2D array) of floats
+> - NumPy 2D arrays
+> - Dictionaries mapping tuples of variable indices to floats
+
+#### 4.2.4 From Direct I/O Stream (In-Memory Data)
+
+```python
+import io
+
+# Suppose 'buffer' is a BytesIO object containing HDF5 or CSV data
+buffer = io.BytesIO(b"...")
+file_obj = File.from_io(
+    data=buffer,
+    name="uploaded_data.h5",  # Will automatically append .h5 if omitted
+    problem=my_problem
+)
+```
+
+#### 5.2.5 Using an Existing File Object
+
+If you have already created/retrieved a `File` object, simply pass it directly:
+
+```python
+existing_file_obj = File.get_files(name="my_data.h5", limit=1)[0]
+file_obj = File.from_instance(existing_file_obj)
+# 'file_obj' points to the same underlying file
+```
+
+### 5.3 Uploading & Overwriting Files
+
+Every method above that "creates" a `File` also performs an upload if the underlying data is not already in VeloxQ:
+
+- When you call `from_instance(...)`, `from_path(...)`, `from_dict(...)`, etc., the file is uploaded automatically.
+- If you re-use the same `name` without setting `force=True`, you’ll get the existing file object without uploading again.
+
+**Example of explicitly forcing an overwrite:**
+
+```python
+file_obj = File.from_instance(
+    "path/to/updated_data.csv",
+    name="my_data.csv",
+    force=True    # Force overwrite if "my_data.csv" already exists
+)
+```
+
+### 5.4 Associating with Problems
+
+To group files under a specific `Problem`, pass a `Problem` object to the creation method:
+
+```python
+my_problem = Problem.create("Experiment_Batch5")
+
+file_obj = File.from_instance(
+    "path/to/local_data.csv",
+    problem=my_problem
+)
+assert file_obj.problem.id == my_problem.id
+```
+
+Or alternately:
+
+```python
+my_problem = Problem.create("Experiment_Batch5")
+
+file_obj = my_problem.new_file(
+    name="big_ising.h5",
+    size=300000
+)
+with open("big_ising.h5", "rb") as f:
+    file_obj.upload(f)
+
+assert file_obj.problem.id == my_problem.id
+```
+
+This ensures that retrieving files for "Experiment_Batch5" will include "local_data.csv".
+
+### 5.5 Downloading Files
+
+1. **Retrieve a file by name:**
+
+   ```python
+   # Returns a list of matching files (max=5 in this example)
+   file_list = File.get_files(name="my_data.csv", limit=5)
+   for f in file_list:
+       print(f.id, f.name, f.status, f.problem.name)
+   ```
+
+2. **Download the file content:**
+
+   ```python
+   # Suppose you have an existing File object
+   with open("local_copy.h5", "wb") as outfile:
+       file_obj.download(outfile)
+   ```
+
+---
+
+## 6. Submitting Jobs
 
 If you prefer non-blocking usage:
 
@@ -532,9 +534,9 @@ result = job.result  # Get the JobResult object
 
 ---
 
-## 6. Retrieving & Managing Jobs
+## 7. Retrieving & Managing Jobs
 
-### 6.1 Waiting for Completion
+### 7.1 Waiting for Completion
 
 If you have a `Job` object:
 
@@ -545,7 +547,7 @@ print(job.statistics)
 
 Raises a `TimeoutError` if it doesn’t complete within the specified time.
 
-### 6.2 Listing Jobs
+### 7.2 Listing Jobs
 
 Use `Job.get_jobs(...)` to obtain multiple jobs from the server:
 
@@ -559,14 +561,14 @@ jobs = Job.get_jobs(
 )
 ```
 
-#### 6.2.1 Filtering by Status or Creation Time
+#### 7.2.1 Filtering by Status or Creation Time
 
 - `status` can be `CREATED`, `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
 - `created_at` can be `TODAY`, `YESTERDAY`, `LAST_WEEK`, `LAST_MONTH`, `LAST_3_MONTHS`, `LAST_YEAR`, or `ALL`.
 
 Returns up to `limit` jobs; default is 1000.
 
-### 6.3 Retrieving Job by ID
+### 7.3 Retrieving Job by ID
 
 If you know a job’s specific ID:
 
@@ -575,7 +577,7 @@ job = Job.from_id("my_job_id_123")
 print(job.status)
 ```
 
-### 6.4 Getting Job Logs
+### 7.4 Getting Job Logs
 
 Logs can be filtered by category, time period, or message substring:
 
@@ -593,9 +595,9 @@ for entry in logs:
 
 ---
 
-## 7. Accessing Results
+## 8. Accessing Results
 
-### 7.1 Direct Access via HDF5
+### 8.1 Direct Access via HDF5
 
 Upon job completion, `job.result` is a `JobResult` object, automatically caching the HDF5 file in a temporary directory.
 
@@ -606,7 +608,7 @@ energies = h5f["Spectrum"]["energies"][:]  # Read into a NumPy array
 print(energies)
 ```
 
-### 7.2 Downloading the Result File
+### 8.2 Downloading the Result File
 
 To manually download to a custom location:
 
