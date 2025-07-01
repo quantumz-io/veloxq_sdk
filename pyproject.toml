@@ -27,6 +27,7 @@ dependencies = [
     "yarl>=1.15.0",
     "h5py>=3.11.0",
     "pydantic>=2.0.0",
+    "dimod>=0.12.0"
 ]
 
 

@@ -15,17 +15,11 @@ from tempfile import TemporaryFile
 
 import h5py
 import numpy as np
+from dimod import BinaryQuadraticModel
+from dimod.views.quadratic import Linear, Quadratic
 from pydantic import Field
 
 from veloxq_sdk.api.base import BaseModel
-
-try:
-    from dimod import BinaryQuadraticModel  # type: ignore[import]
-    from dimod.views.quadratic import Linear, Quadratic  # type: ignore[import]
-except ImportError:
-    class Linear: ...
-    class Quadratic: ...
-    class BinaryQuadraticModel: ...
 
 InstanceLike = t.Union[
     'InstanceDict',
@@ -700,8 +694,8 @@ class File(BaseModel):
     @staticmethod
     def _write_dataset_array(
         file: t.BinaryIO,
-        biases: np.ndarray | list[float],
-        couplings: np.ndarray | list[list[float]],
+        biases: np.ndarray | list[BiasType],
+        couplings: np.ndarray | list[list[CouplingType]],
     ) -> None:
         """Write the Ising model data to an HDF5 file.
 
