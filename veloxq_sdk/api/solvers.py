@@ -207,10 +207,6 @@ class VeloxQParameters(PydanticBaseModel):
         default=5000,
         description='The number of steps to be executed.',
     )
-    timeout: int = Field(
-        default=60,
-        description='The timeout for the solver in seconds.',
-    )
 
 
 class VeloxQSolver(BaseSolver):
