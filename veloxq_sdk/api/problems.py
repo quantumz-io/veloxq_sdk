@@ -214,6 +214,7 @@ class File(BaseModel):
         ) as ws:
             while data := content.read(chunk_size):
                 ws.send(data)
+                ws.recv()
             ws.send(b'')
         self.refresh()
 
