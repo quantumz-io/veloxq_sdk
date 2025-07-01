@@ -497,7 +497,7 @@ class File(BaseModel):
             File: The resulting File object.
 
         """
-        ising = bqm.ising
+        ising = bqm.spin
 
         return cls.from_ising(
             biases=ising.linear,
