@@ -19,7 +19,13 @@ from pydantic import Field
 
 from veloxq_sdk.api.base import BaseModel
 
-_logger = logging.getLogger(__name__)
+try:
+    from dimod import BinaryQuadraticModel  # type: ignore[import]
+    from dimod.views.quadratic import Linear, Quadratic  # type: ignore[import]
+except ImportError:
+    class Linear: ...
+    class Quadratic: ...
+    class BinaryQuadraticModel: ...
 
 InstanceLike = t.Union[
     'InstanceDict',
@@ -27,10 +33,25 @@ InstanceLike = t.Union[
     'File',
     Path,
     str,
+    BinaryQuadraticModel,
 ]
 
-BiasesType = t.Union[t.List[float], np.ndarray, t.Dict[int, float]]
-CouplingsType = t.Union[t.List[t.List[float]], np.ndarray, t.Dict[t.Tuple[int, int], float]]
+BiasType = t.Union[float, np.floating]
+CouplingType = BiasType
+
+BiasesType = t.Union[
+    t.List[BiasType],
+    np.ndarray,
+    t.Dict[int, BiasType],
+    Linear,
+]
+CouplingsType = t.Union[
+    t.List[t.List[CouplingType]],
+    np.ndarray,
+    t.Dict[t.Tuple[int, int], CouplingType],
+    Quadratic,
+]
+
 InstanceTuple = t.Tuple[BiasesType, CouplingsType]
 
 
@@ -362,6 +383,13 @@ class File(BaseModel):
                 problem=problem,
                 force=force,
             )
+        if isinstance(instance, BinaryQuadraticModel):
+            return cls.from_bqm(
+                bqm=instance,
+                name=name,
+                problem=problem,
+                force=force,
+            )
         if isinstance(instance, dict):
             return cls.from_dict(
                 data=instance,
@@ -447,6 +475,40 @@ class File(BaseModel):
         )
 
     @classmethod
+    def from_bqm(
+        cls,
+        bqm: BinaryQuadraticModel,
+        name: str | None = None,
+        problem: Problem | None = None,
+        *,
+        force: bool = False,
+    ):
+        """Create a File instance from a Binary Quadratic Model (BQM).
+
+        This method converts the BQM into an Ising model format and uploads it.
+
+        Args:
+            bqm (BinaryQuadraticModel): The BQM to convert and upload.
+            name (str | None): The file name. By default a hash-based name is generated.
+            problem (Problem | None): Optional Problem to associate with.
+            force (bool): If True, overwrite if a file with the same name exists.
+
+        Returns:
+            File: The resulting File object.
+
+        """
+        ising = bqm.ising
+
+        return cls.from_ising(
+            biases=ising.linear,
+            couplings=ising.quadratic,
+            name=name,
+            problem=problem,
+            force=force,
+        )
+
+
+    @classmethod
     def from_ising(
         cls,
         biases: BiasesType,
@@ -480,14 +542,16 @@ class File(BaseModel):
                 return existing_files[0]
 
         with TemporaryFile() as temp_file:
-            if isinstance(biases, dict) and isinstance(couplings, dict):
+            if isinstance(biases, Linear) and isinstance(couplings, Quadratic):
+                cls._write_dataset_dimod(temp_file, biases, couplings)
+            elif isinstance(biases, dict) and isinstance(couplings, dict):
                 cls._write_dataset_dict(temp_file, biases, couplings)
             elif isinstance(biases, (list, np.ndarray)) and isinstance(couplings, (list, np.ndarray)):
                 cls._write_dataset_array(temp_file, biases, couplings)
             else:
                 msg = (
                     'Unsupported data types for biases and couplings. '
-                    'Expected lists, NumPy arrays, or dictionaries.'
+                    'Expected lists, NumPy arrays, or dictionaries, or Linear and Quadratic.'
                 )
                 raise TypeError(msg)
 
@@ -656,8 +720,8 @@ class File(BaseModel):
     @staticmethod
     def _write_dataset_dict(
         file: t.BinaryIO,
-        biases: t.Dict[int, float],
-        couplings: t.Dict[t.Tuple[int, int], float],
+        biases: t.Dict[int, float | np.floating],
+        couplings: t.Dict[t.Tuple[int, int], float | np.floating],
     ) -> None:
         """Write the Ising model data to an HDF5 file.
 
@@ -674,7 +738,7 @@ class File(BaseModel):
             dataset = hdf.create_dataset(
                 '/Ising/biases',
                 shape=(num_qubits,),
-                dtype=float,
+                dtype=type(next(iter(biases.values()))),
             )
             for i in range(num_qubits):
                 dataset[i] = biases.get(i, 0.0)
@@ -682,8 +746,47 @@ class File(BaseModel):
             coupling_matrix = hdf.create_dataset(
                 '/Ising/couplings',
                 shape=(num_qubits, num_qubits),
-                dtype=float,
+                dtype=type(next(iter(couplings.values()))),
             )
             for (i, j), value in couplings.items():
+                coupling_matrix[i, j] = value
+                coupling_matrix[j, i] = value
+
+    @staticmethod
+    def _write_dataset_dimod(
+        file: t.BinaryIO,
+        linear: Linear,
+        quadratic: Quadratic,
+    ) -> None:
+        """Write the Ising model data to an HDF5 file using dimod.
+
+        Args:
+            file (BinaryIO): The file-like object to write the data to.
+            linear (Linear): Linear biases.
+            quadratic (Quadratic): Quadratic couplings.
+
+        """
+        variable0 = next(iter(linear))
+        if not isinstance(variable0, (int, np.integer)):
+            msg = 'Variables must be integers.'
+            raise TypeError(msg)
+
+        num_qubits = len(linear)
+
+        with h5py.File(file, 'w') as hdf:
+            dataset = hdf.create_dataset(
+                '/Ising/biases',
+                shape=(num_qubits,),
+                dtype=type(linear[variable0]),
+            )
+            for var, val in linear.items():
+                dataset[var] = val
+
+            coupling_matrix = hdf.create_dataset(
+                '/Ising/couplings',
+                shape=(num_qubits, num_qubits),
+                dtype=type(next(iter(quadratic.values()))),
+            )
+            for (i, j), value in quadratic.items():
                 coupling_matrix[i, j] = value
                 coupling_matrix[j, i] = value
