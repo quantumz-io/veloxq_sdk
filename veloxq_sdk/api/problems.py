@@ -304,7 +304,12 @@ class File(BaseModel):
             limit (int): Maximum number of files to return. Default is 1000.
 
         """
-        params: dict[str, int | str] = {'_page': 1, '_limit': limit}
+        params: dict[str, int | str] = {
+            '_page': 1,
+            '_limit': limit,
+            '_sort': 'created_at',
+            'order': 'desc',
+        }
         if name:
             params['q'] = name
 
