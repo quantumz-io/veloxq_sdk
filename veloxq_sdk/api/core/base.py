@@ -6,7 +6,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic.alias_generators import to_camel
 
-from veloxq_sdk.http import ClientMixin
+from veloxq_sdk.api.core.http import ClientMixin
 
 if t.TYPE_CHECKING:
     from httpx import Response

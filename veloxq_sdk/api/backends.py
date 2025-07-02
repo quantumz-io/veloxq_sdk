@@ -1,4 +1,4 @@
-from veloxq_sdk.api.base import BaseModel
+from veloxq_sdk.api.core.base import BaseModel
 
 
 class BaseBackend(BaseModel):

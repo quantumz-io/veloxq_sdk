@@ -13,7 +13,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
 from veloxq_sdk.api.backends import BaseBackend, VeloxQH100_1
-from veloxq_sdk.api.base import BaseModel
+from veloxq_sdk.api.core.base import BaseModel
 from veloxq_sdk.api.jobs import Job, JobResult
 from veloxq_sdk.api.problems import File, Problem
 

@@ -2,13 +2,13 @@
 
 __version__ = '1.0.0dev0'
 
-from veloxq_sdk.api.backends import (
+from veloxq_sdk.backends import (
     VeloxQH100_1,
     VeloxQH100_2,
 )
-from veloxq_sdk.api.jobs import Job
-from veloxq_sdk.api.problems import File, Problem
-from veloxq_sdk.api.solvers import (
+from veloxq_sdk.jobs import Job
+from veloxq_sdk.problems import File, Problem
+from veloxq_sdk.solvers import (
     VeloxQParameters,
     VeloxQSolver,
 )

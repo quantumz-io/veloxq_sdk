@@ -297,7 +297,7 @@ A `Problem` groups related files and can be created or retrieved by name:
 1. **Create a new `Problem`:**
 
    ```python
-   from veloxq_sdk.api.problems import Problem
+   from veloxq_sdk.problems import Problem
 
    # Create a problem named "my_experiment":
    my_problem = Problem.create(name="my_experiment")
@@ -552,7 +552,7 @@ Raises a `TimeoutError` if it doesn’t complete within the specified time.
 Use `Job.get_jobs(...)` to obtain multiple jobs from the server:
 
 ```python
-from veloxq_sdk.api.jobs import Job, JobStatus, PeriodFilter
+from veloxq_sdk.jobs import Job, JobStatus, PeriodFilter
 
 jobs = Job.get_jobs(
     status=JobStatus.PENDING,
@@ -582,7 +582,7 @@ print(job.status)
 Logs can be filtered by category, time period, or message substring:
 
 ```python
-from veloxq_sdk.api.jobs import LogCategory, TimePeriod
+from veloxq_sdk.jobs import LogCategory, TimePeriod
 
 logs = job.get_job_logs(
     category=LogCategory.ERROR,

@@ -19,7 +19,7 @@ from dimod import BinaryQuadraticModel
 from dimod.views.quadratic import Linear, Quadratic
 from pydantic import Field
 
-from veloxq_sdk.api.base import BaseModel
+from veloxq_sdk.api.core.base import BaseModel
 
 InstanceLike = t.Union[
     'InstanceDict',

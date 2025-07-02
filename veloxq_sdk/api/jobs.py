@@ -18,7 +18,7 @@ from tempfile import gettempdir
 import h5py
 from pydantic import Field
 
-from veloxq_sdk.api.base import BaseModel, BasePydanticModel
+from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel
 
 
 class LogCategory(Enum):
