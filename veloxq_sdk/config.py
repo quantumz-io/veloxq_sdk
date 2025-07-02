@@ -182,11 +182,17 @@ class VeloxQAPIConfig(SingletonConfigurable):
             _logger.debug('Loaded config file: %s', loader.full_filename)
 
 
-def load_config(config: ConfigLike) -> None:
+def load_config(config: ConfigLike | None = None) -> None:
     """Load configuration for the VeloxQ API SDK."""
     api_config = VeloxQAPIConfig.instance()
-
-    if isinstance(config, Config):
+    if config is None:
+        config = Config()
+        if api_url := os.environ.get('VELOXQ_API_URL'):
+            config.VeloxQAPIConfig.url = api_url
+        if api_key := os.environ.get('VELOX_TOKEN'):
+            config.VeloxQAPIConfig.token = api_key
+        api_config.update_config(config)
+    elif isinstance(config, Config):
         api_config.update_config(config)
     elif isinstance(config, dict):
         api_config.config.merge(config)
