@@ -120,6 +120,18 @@ It accepts the same argument types as `File.from_instance`.
   print(result.data["Spectrum"]["energies"][:])
   ```
 
+- **Using `dimod.BinaryQuadraticModel`**
+  
+  ```python
+  import dimod
+  from veloxq_sdk import VeloxQSolver
+
+  bqm = dimod.BinaryQuadraticModel({0: 1.0, 2: -1.0}, {(0, 1): -1.0, (1, 2): 0.5}, 0, dimod.SPIN)
+  solver = VeloxQSolver()
+  result = solver.sample(bqm)
+  print(result.data["Spectrum"]["energies"][:])
+  ```
+
 **Submitting a problem defined in a file:**
 
 ```python
