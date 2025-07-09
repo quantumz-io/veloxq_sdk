@@ -235,9 +235,9 @@ class VeloxQSolver(BaseSolver):
 
 
 class SBMParameters(VeloxQParameters):
-    """Parameters for the VeloxQ SBM solver.
+    """Parameters for the SBM solver.
 
-    This model defines the configuration parameters used by the VeloxQ SBM solver.
+    This model defines the configuration parameters used by the SBM solver.
     These include the number of repetitions, the number of steps, and a timeout for
     solver execution, as well as additional parameters specific to the SBM algorithm.
 
@@ -260,10 +260,10 @@ class SBMParameters(VeloxQParameters):
 
 
 class SBMSolver(BaseSolver):
-    """A specialized solver for the VeloxQ SBM (Stochastic Block Model).
+    """A specialized solver for the SBM (Simulated Bifurcation Machine).
 
-    The `VeloxQSBMSolver` class is designed to submit jobs to the VeloxQ platform
-    using a specific backend for solving Stochastic Block Model problems.
+    The `SBMSolver` class is designed to submit jobs to the VeloxQ platform
+    using a specific backend for solving with Simulated Bifurcation Machine algorithm.
 
     Attributes:
         id (str): A unique identifier for this solver on the VeloxQ platform.
@@ -279,5 +279,5 @@ class SBMSolver(BaseSolver):
     )
     parameters: SBMParameters = Field(
         default_factory=SBMParameters,
-        description='Parameters for the VeloxQ SBM solver.',
+        description='Parameters for the SBM solver.',
     )
