@@ -232,3 +232,52 @@ class VeloxQSolver(BaseSolver):
         default_factory=VeloxQParameters,
         description='Parameters for the VeloxQ solver.',
     )
+
+
+class SBMParameters(VeloxQParameters):
+    """Parameters for the VeloxQ SBM solver.
+
+    This model defines the configuration parameters used by the VeloxQ SBM solver.
+    These include the number of repetitions, the number of steps, and a timeout for
+    solver execution, as well as additional parameters specific to the SBM algorithm.
+
+    Attributes:
+        num_rep (int): The number of repetitions to be executed.
+        num_steps (int): The number of steps to be executed.
+        discrete_version (bool): Whether to use the discrete version of the SBM algorithm.
+        dt (float): The time step for the SBM algorithm.
+
+    """
+
+    discrete_version: bool = Field(
+        default=False,
+        description='Whether to use the discrete version of the SBM algorithm for solving NP-hard problems.',
+    )
+    dt: float = Field(
+        default=1.0,
+        description='The time step for the SBM algorithm, which affects the convergence speed and stability of the solution for NP-hard problems.',
+    )
+
+
+class SBMSolver(BaseSolver):
+    """A specialized solver for the VeloxQ SBM (Stochastic Block Model).
+
+    The `VeloxQSBMSolver` class is designed to submit jobs to the VeloxQ platform
+    using a specific backend for solving Stochastic Block Model problems.
+
+    Attributes:
+        id (str): A unique identifier for this solver on the VeloxQ platform.
+        backend (BaseBackend): The backend to use for the VeloxQ SBM solver. Defaults to `VeloxQH100_1`.
+        parameters (SBMParameters): The parameters controlling solver execution.
+
+    """
+
+    id: str = '524c60b7-424e-4e12-b155-d7b79a2bc007'
+    backend: BaseBackend = Field(
+        default=VeloxQH100_1(),
+        description='The backend to use for the VeloxQ SBM solver.',
+    )
+    parameters: SBMParameters = Field(
+        default_factory=SBMParameters,
+        description='Parameters for the VeloxQ SBM solver.',
+    )
