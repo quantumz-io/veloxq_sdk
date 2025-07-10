@@ -11,6 +11,8 @@ from veloxq_sdk.problems import File, Problem
 from veloxq_sdk.solvers import (
     VeloxQParameters,
     VeloxQSolver,
+    SBMParameters,
+    SBMSolver,
 )
 
 __all__ = [
@@ -21,4 +23,6 @@ __all__ = [
     'VeloxQH100_2',
     'VeloxQParameters',
     'VeloxQSolver',
+    'SBMParameters',
+    'SBMSolver',
 ]
