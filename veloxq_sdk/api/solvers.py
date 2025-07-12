@@ -14,10 +14,11 @@ from pydantic import Field
 
 from veloxq_sdk.api.backends import BaseBackend, VeloxQH100_1
 from veloxq_sdk.api.core.base import BaseModel
-from veloxq_sdk.api.jobs import Job, JobResult
+from veloxq_sdk.api.jobs import Job
 from veloxq_sdk.api.problems import File, Problem
 
 if t.TYPE_CHECKING:
+    from veloxq_sdk.api.jobs import VeloxSampleSet
     from veloxq_sdk.api.problems import (
         BiasesType,
         CouplingsType,
@@ -50,7 +51,7 @@ class BaseSolver(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         force: bool = False,
-    ) -> JobResult:
+    ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
         This method takes an instance of a problem (such as Ising model data or
@@ -65,7 +66,7 @@ class BaseSolver(BaseModel):
                 Defaults to False.
 
         Returns:
-            JobResult: An object that provides access to the completed job's results.
+            VeloxSampleSet: An object that provides access to the completed job's results.
 
         Example:
             >>> solver = VeloxQSolver()
@@ -83,7 +84,7 @@ class BaseSolver(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         force: bool = False,
-    ) -> JobResult:
+    ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
         This method takes an instance of a problem (such as Ising model data or
@@ -99,7 +100,7 @@ class BaseSolver(BaseModel):
                 Defaults to False.
 
         Returns:
-            JobResult: An object that provides access to the completed job's results.
+            VeloxSampleSet: An object that provides access to the completed job's results.
 
         Example:
             >>> solver = VeloxQSolver()
@@ -117,7 +118,7 @@ class BaseSolver(BaseModel):
         problem: Problem | None = None,
         force: bool = False,
         **kwargs,
-    ) -> JobResult:
+    ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
         This method takes an instance of a problem (such as Ising model data or
@@ -135,7 +136,7 @@ class BaseSolver(BaseModel):
                 as positional arguments.
 
         Returns:
-            JobResult: An object that provides access to the completed job's results.
+            VeloxSampleSet: An object that provides access to the completed job's results.
 
         Example:
             >>> solver = VeloxQSolver()

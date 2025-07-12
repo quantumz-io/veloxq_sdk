@@ -16,6 +16,9 @@ from pathlib import Path
 from tempfile import gettempdir
 
 import h5py
+from dimod.sampleset import SampleSet
+from dimod.vartypes import SPIN
+import numpy as np
 from pydantic import Field
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel
@@ -320,21 +323,39 @@ class Job(BaseModel):
         return [JobLogsRow.model_validate(item) for item in data]
 
     @cached_property
-    def result(self) -> JobResult:
+    def result(self) -> VeloxSampleSet:
         """Get the result of the job.
 
         Returns:
-            JobResult: The job's result accessor.
+            VeloxSampleSet: A SampleSet object containing the job's result data.
+        """
+        temp_file = self._get_temp_result()
+        with h5py.File(temp_file, 'r') as file:
+            return VeloxSampleSet.from_result(file)
 
-        Raises:
-            RuntimeError: If the job status is not 'completed'.
+    def download_result(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
+        """Download the result.
+
+        Args:
+            file (t.BinaryIO): The destination file-like object to write the content to.
+            chunk_size (int): The size (in bytes) of each chunk read from the response. 
+                Default is 1 MB.
 
         """
         self.refresh()
         if self.status != JobStatus.COMPLETED.value:
             msg = f'Job {self.id} has not completed successfully.'
             raise RuntimeError(msg)
-        return JobResult(id=self.id)
+
+        with self.http.stream(
+            'GET',
+            f'jobs/{self.id}/result/download',
+            params={'type': 'hdf5'},
+        ) as response:
+            response.raise_for_status()
+            for chunk in response.iter_bytes(chunk_size):
+                file.write(chunk)
+
 
     def refresh(self) -> None:
         """Refresh the job data from the API."""
@@ -384,51 +405,8 @@ class Job(BaseModel):
         response.raise_for_status()
         return cls.model_validate(response.json())
 
-
-class JobResult(BaseModel):
-    """Job result Accessor.
-
-    Provides HDF5-based download and local caching for easy access.
-
-    Usage for downloading:
-        ```python
-        job = Job.from_id('job123')
-        result = job.result  # Access the job's result
-        with open('result.hdf5', 'wb') as f:
-            result.download(f)  # Download the result to a file
-        ```
-    Usage to access data directly:
-        ```python
-        job = Job.from_id('job123')
-        # Access the energies from the result
-        energies = job.result.data['Spectrum']['energies']
-        plt.plot(np.asarray(energies))
-        plt.show()
-        ```
-    """
-
-    @property
-    def data(self) -> h5py.File:
-        """HDF5 result file object.
-
-        Retrieve an opened HDF5 file containing the job's result.
-        Downloads the file to a temporary location if not already cached.
-
-        Returns:
-            h5py.File: The results in HDF5 format.
-
-        """
-        if not hasattr(self, '_data'):
-            self._data = h5py.File(self._get_tempfile(), 'r')
-        return self._data
-
-    def __del__(self) -> None:
-        """Close the HDF5 file object if it exists."""
-        if hasattr(self, '_data'):
-            self._data.close()
-
-    def _get_tempfile(self) -> Path:
-        """Get the temporary file path for the job result.
+    def _get_temp_result(self) -> Path:
+        """Get the temporary cached result file.
 
         Return the local Path object pointing to the cached job result. If the file is
         missing or has zero length, the result is downloaded.
@@ -442,23 +420,60 @@ class JobResult(BaseModel):
             return temp_file
 
         with temp_file.open('wb') as f:
-            self.download(f)
+            self.download_result(f)
         return temp_file
 
-    def download(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
-        """Download the result.
 
-        Args:
-            file (t.BinaryIO): The destination file-like object to write the content to.
-            chunk_size (int): The size (in bytes) of each chunk read from the response. 
-                Default is 1 MB.
+class VeloxSampleSet(SampleSet):
+    """A SampleSet class for VeloxQ API results.
+
+    This class extends the dimod SampleSet to handle results from VeloxQ jobs,
+    specifically designed to work with HDF5 files containing job results.
+
+    See [dimod.sampleset.SampleSet](https://docs.dwavequantum.com/en/latest/ocean/api_ref_dimod/sampleset.html#dimod.SampleSet)
+    for more details on the implementation and usage of SampleSet.
+    """
+
+    @property
+    def energy(self) -> np.ndarray:
+        """Get the energies of the samples.
+
+        Returns:
+            np.ndarray: An array of energies corresponding to the samples.
 
         """
-        with self.http.stream(
-            'GET',
-            f'jobs/{self.id}/result/download',
-            params={'type': 'hdf5'},
-        ) as response:
-            response.raise_for_status()
-            for chunk in response.iter_bytes(chunk_size):
-                file.write(chunk)
+        return self.record.energy
+
+    @property
+    def sample(self) -> np.ndarray:
+        """Get the states of the samples.
+
+        Returns:
+            np.ndarray: An array of sample states.
+
+        """
+        return self.record.sample
+
+    @classmethod
+    def from_result(cls, file: h5py.File) -> VeloxSampleSet:
+        """Create a VeloxSampleSet from an HDF5 file.
+
+        Args:
+            file (h5py.File): The HDF5 file containing the samples.
+
+        Returns:
+            VeloxSampleSet: A SampleSet object created from the HDF5 file.
+
+        """
+        samples = file['Spectrum/states']
+        energies = file['Spectrum/energies']
+        return cls.from_samples(
+            samples,
+            energy=energies,
+            vartype=SPIN,
+            info={
+                'num_batches': file['Spectrum/num_batches'][()],
+                **json.loads(file['Spectrum/metadata'][()])
+            },
+            aggregate_samples=True,
+        )
