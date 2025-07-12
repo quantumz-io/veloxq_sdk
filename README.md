@@ -17,8 +17,9 @@ This project provides a configurable Python client interface for submitting and 
     - [3.4 Live Updates to Configuration](#34-live-updates-to-configuration)
   - [4. Selecting Solvers \& Backends](#4-selecting-solvers--backends)
     - [4.1 Default Solver: VeloxQSolver](#41-default-solver-veloxqsolver)
-    - [4.2 Backend Options](#42-backend-options)
-    - [4.3 Setting Solver Parameters](#43-setting-solver-parameters)
+    - [4.2 Setting Solver Parameters](#42-setting-solver-parameters)
+    - [4.3 SBM Solver](#43-sbm-Solver)
+    - [4.4 Backend Options](#44-backend-options)
   - [5. Defining Problems \& Files](#5-defining-problems--files)
     - [5.1 Managing Problems](#51-managing-problems)
     - [5.2 Creating Files from Different Sources](#52-creating-files-from-different-sources)
@@ -253,7 +254,64 @@ from veloxq_sdk import VeloxQSolver
 solver = VeloxQSolver()
 ```
 
-### 4.2 Backend Options
+### 4.2 Setting Solver Parameters
+
+`VeloxQParameters` defines:
+
+- `num_rep` (default=4096) The number of repetitions to be executed.
+- `num_steps` (default=5000) The number of steps to be executed.
+
+Example:
+
+**Configure after solver selected:**
+
+```python
+solver.parameters.num_rep = 2048
+```
+
+**Configure before selecting the solver:**
+
+```python
+params = VeloxQParameters(num_steps=4000)
+
+solver1 = VeloxQSolver(parameters=params)
+solver2 = VeloxQSolver(parameters=params, backend=VeloxQH100_2())
+```
+
+These parameters are transmitted to the VeloxQ API upon problem submission.
+
+### 4.3 SBM Solver
+
+The `SBMSolver` is a specialized solver designed to submit jobs to the VeloxQ platform using the Simulated Bifurcation Machine (SBM) algorithm. It inherits from the `BaseSolver` class and provides additional parameters specific to the SBM algorithm.
+
+**Key Attributes:**
+
+- **Backend:** Defaults to `VeloxQH100_1`, but can be changed to other available backends.
+- **Parameters:** Includes standard parameters like `num_rep`, `num_steps`, as well as SBM-specific parameters like `discrete_version` and `dt`.
+
+#### 4.3.1 Instantiating the SBMSolver
+
+```python
+from veloxq_sdk import SBMSolver
+
+solver = SBMSolver()
+```
+
+#### 4.3.2 SBM Solver Parameters
+
+The `SBMParameters` class extends `VeloxQParameters` and adds SBM-specific parameters:
+
+- `discrete_version (bool)`: Whether to use the discrete version of the SBM algorithm. Defaults to `False`.
+- `dt (float)`: The time step for the SBM algorithm, which affects convergence speed and stability. Defaults to `1.0`.
+
+Example of configuring SBM-specific parameters:
+
+```python
+solver.parameters.discrete_version = True
+solver.parameters.dt = 0.5
+```
+
+### 4.4 Backend Options
 
 Two common backends included in this SDK:
 
@@ -267,34 +325,6 @@ from veloxq_sdk import VeloxQH100_2
 
 solver.backend = VeloxQH100_2()
 ```
-
-### 4.3 Setting Solver Parameters
-
-`VeloxQParameters` defines:
-
-- `num_rep` (default=4096)
-- `num_steps` (default=5000)
-- `timeout` (default=60 seconds)
-
-Example:
-
-**Configure after solver selected:**
-
-```python
-solver.parameters.num_rep = 2048
-solver.parameters.timeout = 45
-```
-
-**Configure before selecting the solver:**
-
-```python
-params = VeloxQParameters(timeout=4000)
-
-solver1 = VeloxQSolver(parameters=params)
-solver2 = VeloxQSolver(parameters=params, backend=VeloxQH100_2())
-```
-
-These parameters are transmitted to the VeloxQ API upon problem submission.
 
 ---
 
