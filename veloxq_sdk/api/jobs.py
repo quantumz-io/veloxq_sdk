@@ -18,6 +18,7 @@ from tempfile import gettempdir
 import h5py
 from dimod.sampleset import SampleSet
 from dimod.vartypes import SPIN
+import numpy as np
 from pydantic import Field
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel
@@ -432,6 +433,26 @@ class VeloxSampleSet(SampleSet):
     See [dimod.sampleset.SampleSet](https://docs.dwavequantum.com/en/latest/ocean/api_ref_dimod/sampleset.html#dimod.SampleSet)
     for more details on the implementation and usage of SampleSet.
     """
+
+    @property
+    def energy(self) -> np.ndarray:
+        """Get the energies of the samples.
+
+        Returns:
+            np.ndarray: An array of energies corresponding to the samples.
+
+        """
+        return self.record.energy
+
+    @property
+    def sample(self) -> np.ndarray:
+        """Get the states of the samples.
+
+        Returns:
+            np.ndarray: An array of sample states.
+
+        """
+        return self.record.sample
 
     @classmethod
     def from_result(cls, file: h5py.File) -> VeloxSampleSet:
