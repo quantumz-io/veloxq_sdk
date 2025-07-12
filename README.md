@@ -38,7 +38,7 @@ This project provides a configurable Python client interface for submitting and 
     - [7.3 Retrieving Job by ID](#73-retrieving-job-by-id)
     - [7.4 Getting Job Logs](#74-getting-job-logs)
   - [8. Accessing Results](#8-accessing-results)
-    - [8.1 Direct Access via HDF5](#81-direct-access-via-hdf5)
+    - [8.1 Direct Access via `VeloxSampleSet`](#81-direct-access-via-veloxsampleset)
     - [8.2 Downloading the Result File](#82-downloading-the-result-file)
 
 ---
@@ -83,8 +83,8 @@ It accepts the same argument types as `File.from_instance`.
       [0, -1, 0]
   ]
 
-  result = solver.sample(biases, couplings)  # Returns JobResult object
-  print(result.data["Spectrum"]["energies"][:])
+  result = solver.sample(biases, couplings)  # Returns VeloxSampleSet object
+  print(result)
   ```
 
 - **Using NumPy arrays:**
@@ -103,7 +103,7 @@ It accepts the same argument types as `File.from_instance`.
   ])
 
   result = solver.sample(biases, couplings)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.first)  # get lowest energy/state
   ```
 
 - **Using dictionaries (sparse data):**
@@ -117,7 +117,7 @@ It accepts the same argument types as `File.from_instance`.
   couplings = {(0, 1): -1.0, (1, 2): 0.5}
 
   result = solver.sample(biases=biases, couplings=couplings)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.energy)  # print energies
   ```
 
 - **Using `dimod.BinaryQuadraticModel`**
@@ -129,7 +129,7 @@ It accepts the same argument types as `File.from_instance`.
   bqm = dimod.BinaryQuadraticModel({0: 1.0, 2: -1.0}, {(0, 1): -1.0, (1, 2): 0.5}, 0, dimod.SPIN)
   solver = VeloxQSolver()
   result = solver.sample(bqm)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.sample)  # print all found states
   ```
 
 **Submitting a problem defined in a file:**
@@ -140,7 +140,7 @@ from veloxq_sdk import VeloxQSolver
 solver = VeloxQSolver()
 
 result = solver.sample("ising_model.h5")
-print(result.data["Spectrum"]["energies"][:])
+print(result)
 ```
 
 **Submitting an instance in dictionary format:**
@@ -156,7 +156,7 @@ instance_data = {
 }
 
 result = solver.sample(instance_data)
-print(result.data["Spectrum"]["energies"][:])
+print(result)
 ```
 
 ---
