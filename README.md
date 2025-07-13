@@ -39,7 +39,7 @@ This project provides a configurable Python client interface for submitting and 
     - [7.3 Retrieving Job by ID](#73-retrieving-job-by-id)
     - [7.4 Getting Job Logs](#74-getting-job-logs)
   - [8. Accessing Results](#8-accessing-results)
-    - [8.1 Direct Access via HDF5](#81-direct-access-via-hdf5)
+    - [8.1 Direct Access via `VeloxSampleSet`](#81-direct-access-via-veloxsampleset)
     - [8.2 Downloading the Result File](#82-downloading-the-result-file)
 
 ---
@@ -84,8 +84,8 @@ It accepts the same argument types as `File.from_instance`.
       [0, -1, 0]
   ]
 
-  result = solver.sample(biases, couplings)  # Returns JobResult object
-  print(result.data["Spectrum"]["energies"][:])
+  result = solver.sample(biases, couplings)  # Returns VeloxSampleSet object
+  print(result)
   ```
 
 - **Using NumPy arrays:**
@@ -104,7 +104,7 @@ It accepts the same argument types as `File.from_instance`.
   ])
 
   result = solver.sample(biases, couplings)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.first)  # get lowest energy/state
   ```
 
 - **Using dictionaries (sparse data):**
@@ -118,7 +118,7 @@ It accepts the same argument types as `File.from_instance`.
   couplings = {(0, 1): -1.0, (1, 2): 0.5}
 
   result = solver.sample(biases=biases, couplings=couplings)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.energy)  # print energies
   ```
 
 - **Using `dimod.BinaryQuadraticModel`**
@@ -130,7 +130,7 @@ It accepts the same argument types as `File.from_instance`.
   bqm = dimod.BinaryQuadraticModel({0: 1.0, 2: -1.0}, {(0, 1): -1.0, (1, 2): 0.5}, 0, dimod.SPIN)
   solver = VeloxQSolver()
   result = solver.sample(bqm)
-  print(result.data["Spectrum"]["energies"][:])
+  print(result.sample)  # print all found states
   ```
 
 **Submitting a problem defined in a file:**
@@ -141,7 +141,7 @@ from veloxq_sdk import VeloxQSolver
 solver = VeloxQSolver()
 
 result = solver.sample("ising_model.h5")
-print(result.data["Spectrum"]["energies"][:])
+print(result)
 ```
 
 **Submitting an instance in dictionary format:**
@@ -157,7 +157,7 @@ instance_data = {
 }
 
 result = solver.sample(instance_data)
-print(result.data["Spectrum"]["energies"][:])
+print(result)
 ```
 
 ---
@@ -571,7 +571,7 @@ Later, you can retrieve and check the job:
 ```python
 job = Job.from_id(job_id)  # Get job from ID
 job.wait_for_completion()
-result = job.result  # Get the JobResult object
+result = job.result  # Get the VeloxSampleSet object
 ```
 
 ---
@@ -639,24 +639,156 @@ for entry in logs:
 
 ## 8. Accessing Results
 
-### 8.1 Direct Access via HDF5
+### 8.1 Direct Access via `VeloxSampleSet`
 
-Upon job completion, `job.result` is a `JobResult` object, automatically caching the HDF5 file in a temporary directory.
+When a job completes, the `job.result` property returns a `VeloxSampleSet` object, which inherits all implementations from dimod's `SampleSet` class. A `SampleSet` object contains the samples and associated data, such as energies, variable values, and per-sample data.
+
+> **Note:** See [dimod's documentation for `SampleSet`](https://docs.dwavequantum.com/en/latest/ocean/api_ref_dimod/sampleset.html#dimod.SampleSet>) for more information regarding extra usage and features.
+
+#### Properties
+
+- **`first`**: The lowest energy `Sample` object.
+
+  **Example:**
+
+  ```python
+  print(job.result.first)  # lowest energy sample
+  ```
+
+- **`sample`**: A NumPy array containing the sample states. Each row corresponds to a sample, and each column corresponds to a variable.
+
+  **Example:**
+
+  ```python
+  print(job.result.sample)  # Access the sample states
+  ```
+
+- **`energy`**: A NumPy array containing the energies of the samples. Each element corresponds to the energy of a sample.
+
+  **Example:**
+
+  ```python
+  print(job.result.energy)  # Access the energies
+  ```
+
+- **`info`**: A dictionary containing additional information about the solver's result as a whole. This might include metadata such as timing information or solver-specific data.
+
+  **Example:**
+
+  ```python
+  print(job.result.info)               # Additional information and metadata
+  ```
+
+#### Methods
+
+- **`samples(n=None, sorted_by='energy')`**: Returns an iterable over the samples. By default, samples are returned in order of increasing energy.
+
+  - **Parameters:**
+    - `n` (int, optional): Maximum number of samples to return.
+    - `sorted_by` (str or None, optional): Field to sort by. If `None`, samples are returned in record order.
+
+  - **Example:**
+
+    ```python
+    for sample in job.result.samples():
+        print(sample)
+    ```
+
+- **`data(fields=None, sorted_by='energy', name='Sample', reverse=False, sample_dict_cast=True, index=False)`**: Iterate over the data in the `SampleSet`, yielding named tuples containing the requested fields.
+
+  - **Parameters:**
+    - `fields` (list, optional): Fields to include in the yielded tuples. Defaults to all fields.
+    - `sorted_by` (str or None, optional): Field to sort by.
+    - `reverse` (bool, optional): If `True`, reverse the sort order.
+
+  - **Example:**
+
+    ```python
+    for datum in job.result.data(['sample', 'energy']):
+        print(datum.sample, datum.energy)
+    ```
+
+- **`filter(pred)`**: Return a new `SampleSet` containing only the samples for which the given predicate function returns `True`.
+
+  - **Parameters:**
+    - `pred`: A function that takes a data tuple and returns a boolean.
+
+  - **Example:**
+
+    ```python
+    # Filter samples with energy less than -1.0
+    filtered_sampleset = job.result.filter(lambda d: d.energy < -1.0)
+    ```
+
+- **`lowest(rtol=1.e-5, atol=1.e-8)`**: Return a new `SampleSet` containing only the samples with the lowest energy (within specified tolerances).
+
+  - **Parameters:**
+    - `rtol` (float, optional): Relative tolerance.
+    - `atol` (float, optional): Absolute tolerance.
+
+  - **Example:**
+
+    ```python
+    lowest_energy_samples = job.result.lowest()
+    ```
+
+- **`truncate(n, sorted_by='energy')`**: Create a new `SampleSet` containing at most `n` samples, sorted by the specified field.
+
+  - **Parameters:**
+    - `n` (int): Maximum number of samples.
+    - `sorted_by` (str or None, optional): Field to sort by.
+
+  - **Example:**
+
+    ```python
+    top_samples = job.result.truncate(10)
+    ```
+
+- **`to_pandas_dataframe(sample_column=False)`**: Convert the `SampleSet` to a Pandas DataFrame.
+
+  - **Parameters:**
+    - `sample_column` (bool, optional): If `True`, samples are stored as a single column of dictionaries.
+
+  - **Example:**
+
+    ```python
+    df = job.result.to_pandas_dataframe()
+    print(df.head())
+    ```
+
+---
+
+**Example Usage:**
 
 ```python
-h5f = job.result.data
+# Accessing basic properties
+print("Variables:", job.result.variables)
+print("Variable type:", job.result.vartype)
+print("Sample info:", job.result.info)
 
-energies = h5f["Spectrum"]["energies"][:]  # Read into a NumPy array
-print(energies)
+# get the lowest energy
+lowest_sample = job.result.first
+print("Lowest State:", lowest_sample)
+
+
+# Filtering samples based on a condition
+filtered_samples = job.result.filter(lambda d: d.energy < -1.0)
+
+# Converting to a DataFrame for analysis
+df = job.result.to_pandas_dataframe()
+print(df.describe())
 ```
 
 ### 8.2 Downloading the Result File
 
-To manually download to a custom location:
+To manually download to a custom location and access the hdf5 data.
 
 ```python
 with open("my_results.hdf5", "wb") as f:
-    job.result.download(f, chunk_size=1024*1024)
+    job.download_result(f, chunk_size=1024*1024)
+
+with h5py.File("my_result.hdf5", "r") as data:
+    states = data["Spectrum/states"][:]
 ```
 
 ---
