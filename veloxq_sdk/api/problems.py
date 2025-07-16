@@ -185,11 +185,11 @@ class Problem(BaseModel):
         return [cls.model_validate(item) for item in data]
 
     @classmethod
-    def from_id(cls, problem_id: int) -> Problem:
-        """Create a Problem instance from an integer ID.
+    def from_id(cls, problem_id: str) -> Problem:
+        """Create a Problem instance from an ID.
 
         Args:
-            problem_id (int): The unique problem ID in the VeloxQ system.
+            problem_id (str): The unique problem ID in the VeloxQ system.
 
         Returns:
             Problem: The matching Problem object, if found.
