@@ -115,6 +115,20 @@ class Problem(BaseModel):
         """
         return File.create(name=name, size=size, problem=self)
 
+    def delete(self):
+        """Delete this problem from the VeloxQ platform.
+
+        Raises:
+            ValueError: If the problem cannot be deleted.
+
+        """
+        response = self._http.delete(f'problems/{self.id}')
+        try:
+            response.raise_for_status()
+        except BaseException as e:
+            msg = f'Failed to delete problem {self.id}'
+            raise ValueError(msg) from e
+
     @classmethod
     def undefined(cls) -> Problem:
         """Retrieve or create a default "undefined" Problem instance.
