@@ -31,5 +31,7 @@ jobs:
         pip install -e .[dev]
 
     - name: Run tests
+      env:
+          VELOX_TOKEN: ${{ secrets.VELOX_TOKEN }}
       run: |
         pytest --cov=. --junitxml=report.xml --cov-report=xml
