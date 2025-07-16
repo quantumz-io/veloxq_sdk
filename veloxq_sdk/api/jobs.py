@@ -343,7 +343,7 @@ class Job(BaseModel):
 
         """
         self.refresh()
-        if self.status != JobStatus.COMPLETED.value:
+        if self.status != JobStatus.COMPLETED:
             msg = f'Job {self.id} has not completed successfully.'
             raise RuntimeError(msg)
 

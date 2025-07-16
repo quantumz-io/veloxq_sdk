@@ -21,7 +21,7 @@ class BasePydanticModel(PydanticBaseModel):
         extra = 'ignore'
         alias_generator = to_camel
         populate_by_name = True  # Allow population by field name
-        use_enum_values = True
+        use_enum_values = False
         validate_by_name = True
         validate_by_alias = True
 
