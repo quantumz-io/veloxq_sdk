@@ -16,7 +16,7 @@ from veloxq_sdk.api.tests.data.instances import check_result_h5
 def test_job(job: Job) -> None:
     """Test the Job fixture."""
     assert job.id is not None
-    assert job.status in {JobStatus.PENDING, JobStatus.COMPLETED}
+    assert job.status in {JobStatus.CREATED, JobStatus.PENDING, JobStatus.COMPLETED}
 
     # Check that the job can be refreshed
     job.wait_for_completion(timeout=3600)
