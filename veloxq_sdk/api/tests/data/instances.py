@@ -86,7 +86,7 @@ def check_result(result: VeloxSampleSet) -> None:
 
 def check_result_h5(result_file: h5py.File) -> None:
     """Check that the result in HDF5 format is correct."""
-    sample = result_file['Spectrum/samples'][0]
+    sample = result_file['Spectrum/states'][0]
     energy = result_file['Spectrum/energies'][0]
 
     assert sample[0] == 1
