@@ -361,11 +361,6 @@ class Job(BaseModel):
         """Refresh the job data from the API."""
         self._update_from_response(self.http.get(f'jobs/{self.id}'))
 
-    def delete(self):
-        """Delete the job from the server."""
-        response = self.http.delete(f'jobs/{self.id}')
-        response.raise_for_status()
-
     @classmethod
     def get_jobs(
         cls,
