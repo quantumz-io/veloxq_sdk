@@ -31,8 +31,8 @@ def test_solvers(solver, parameter, backend, problem):
 
     check_result(result)
 
-    job = Job.from_id(result.info['job_id'])
-    job.delete()
+    # job = Job.from_id(result.info['job_id'])
+    # job.delete()
 
 
 @pytest.mark.parametrize(
@@ -47,5 +47,5 @@ def test_sample(instance, problem):
 
     check_result(result)
 
-    job = Job.from_id(result.info['job_id'])
-    job.delete()
+    # job = Job.from_id(result.info['job_id'])
+    # job.delete()
