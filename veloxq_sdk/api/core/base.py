@@ -60,7 +60,7 @@ class BaseModel(BasePydanticModel, ClientMixin):
         update = self.model_dump(mode='json')
         update.update(data)
         updated_model = self.model_validate(update)
-        for k in updated_model.model_fields:
+        for k in type(updated_model).model_fields:
             if k == 'id':
                 continue
             setattr(self, k, getattr(updated_model, k))
