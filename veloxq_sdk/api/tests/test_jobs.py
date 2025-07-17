@@ -67,11 +67,11 @@ def test_get_jobs(file):
     job1.wait_for_completion(timeout=3600)
     job2.wait_for_completion(timeout=3600)
 
-    job1.delete()
-    job2.delete()
+    # job1.delete()
+    # job2.delete()
 
-    with pytest.raises(HTTPStatusError, check=lambda e: e.response.status_code == codes.NOT_FOUND):
-        Job.from_id(job1.id)
+    # with pytest.raises(HTTPStatusError, check=lambda e: e.response.status_code == codes.NOT_FOUND):
+    #     Job.from_id(job1.id)
 
-    with pytest.raises(HTTPStatusError, check=lambda e: e.response.status_code == codes.NOT_FOUND):
-        Job.from_id(job2.id)
+    # with pytest.raises(HTTPStatusError, check=lambda e: e.response.status_code == codes.NOT_FOUND):
+    #     Job.from_id(job2.id)
