@@ -26,7 +26,7 @@ def test_job(job: Job) -> None:
     assert job.timeline[0].name == JobStatus.CREATED
     assert job.timeline[-1].name == JobStatus.COMPLETED
 
-    assert job.created_at < job.updated_at < dt.datetime.now()
+    assert job.created_at < job.updated_at < dt.datetime.now(tz=job.created_at.tzinfo)
 
     assert job.statistics.usage_time > 0
     assert job.statistics.pending_time >= 0
@@ -54,8 +54,8 @@ def test_get_jobs(file):
     job1 = VeloxQSolver().submit(file)
     job2 = VeloxQSolver().submit(file)
 
-    assert job1.created_at > timestamp
-    assert job2.created_at > timestamp
+    assert job1.created_at > timestamp.astimezone(job1.created_at.tzinfo)
+    assert job2.created_at > timestamp.astimezone(job2.created_at.tzinfo)
 
     jobs = Job.get_jobs(created_at=PeriodFilter.TODAY)
 
