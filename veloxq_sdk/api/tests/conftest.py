@@ -1,39 +1,37 @@
 import typing as t
+import uuid
 
-from httpx import HTTPStatusError
 import pytest
+from httpx import HTTPStatusError
 
-from veloxq_sdk.api.problems import Problem, File
 from veloxq_sdk.api.jobs import Job
+from veloxq_sdk.api.problems import File, Problem
 from veloxq_sdk.api.solvers import VeloxQParameters, VeloxQSolver
-
 from veloxq_sdk.api.tests.data.instances import INSTANCE_DIMOD
 
 
-@pytest.fixture
-def problem_files():
-    try:
-        problem = Problem.create(name='test_problem_files')
-    except HTTPStatusError:
-        problem = Problem.get_problems(name='test_problem_files')[0]
+@pytest.fixture(scope='session')
+def session_id() -> str:
+    """Fixture to provide a unique session ID for the test run."""
+    return str(uuid.uuid4())
+
+
+@pytest.fixture(scope='session')
+def problem_files(session_id: str) -> t.Iterator[Problem]:
+    problem = Problem.create(name=f'test_problem_files-{session_id}')
     try:
         yield problem
     finally:
-        ...
-        # problem.delete()
+        problem.delete()
 
 
-@pytest.fixture
-def problem():
-    try:
-        problem = Problem.create(name='test_problem')
-    except HTTPStatusError:
-        problem = Problem.get_problems(name='test_problem')[0]
+@pytest.fixture(scope='session')
+def problem(session_id: str) -> t.Iterator[Problem]:
+    problem = Problem.create(name=f'test_problem_jobs-{session_id}')
     try:
         yield problem
     finally:
-        ...
-        # problem.delete()
+        problem.delete()
 
 
 @pytest.fixture
