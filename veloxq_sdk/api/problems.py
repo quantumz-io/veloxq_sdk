@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryFile
 
+import httpx
 import h5py
 import numpy as np
 from dimod import BinaryQuadraticModel
@@ -262,7 +263,7 @@ class File(BaseModel):
         """
         download_url = self.http.get(f'problems/{self.problem.id}/files/{self.id}')
         download_url.raise_for_status()
-        with self.http.stream('GET', download_url.text) as response:
+        with httpx.stream('GET', download_url.text.strip('"')) as response:
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
