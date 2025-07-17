@@ -5,9 +5,10 @@ from veloxq_sdk.api.backends import (
     VeloxQH100_1,
     VeloxQH100_2,
 )
-from veloxq_sdk.api.jobs import Job
 from veloxq_sdk.api.solvers import (
+    SBMParameters,
     SBMSolver,
+    VeloxQParameters,
     VeloxQSolver,
 )
 from veloxq_sdk.api.tests.data.instances import (
@@ -17,11 +18,14 @@ from veloxq_sdk.api.tests.data.instances import (
 )
 
 
-@pytest.mark.parametrize('solver', [VeloxQSolver, SBMSolver])
+@pytest.mark.parametrize(('solver', 'parameter'), [
+    (VeloxQSolver, VeloxQParameters(num_rep=10)),
+    (SBMSolver, SBMParameters(num_rep=10)),
+])
 @pytest.mark.parametrize('backend', [VeloxQH100_1, VeloxQH100_2])
-def test_solvers(solver, backend):
-    solver_instance = solver(backend=backend)
-    result = solver_instance.sample(INSTANCE_DIMOD)
+def test_solvers(solver, parameter, backend, problem):
+    solver_instance = solver(parameter=parameter, backend=backend)
+    result = solver_instance.sample(INSTANCE_DIMOD, problem=problem)
 
     assert result.record.num_occurrences[0] == solver_instance.parameters.num_rep
 
@@ -35,9 +39,9 @@ def test_solvers(solver, backend):
     'instance',
     INSTANCES,
 )
-def test_sample(instance):
-    solver = VeloxQSolver()
-    result = solver.sample(instance=instance)
+def test_sample(instance, problem):
+    solver = VeloxQSolver(parameters=VeloxQParameters(num_rep=10))
+    result = solver.sample(instance=instance, problem=problem)
 
     assert result.record.num_occurrences[0] == solver.parameters.num_rep
 
