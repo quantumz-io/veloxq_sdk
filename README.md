@@ -53,6 +53,8 @@ git clone git@github.com:quantumz-io/veloxq_sdk.git
 pip install .
 ```
 
+> **NOTE:** It is recomended to install this package in a dedicated python environment to prevent any dependency problems.
+
 ---
 
 ## 2. Quickstart
