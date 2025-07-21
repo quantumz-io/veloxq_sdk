@@ -49,8 +49,7 @@ This project provides a configurable Python client interface for submitting and 
 Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.8+:
 
 ```shell
-git clone git@github.com:quantumz-io/veloxq_sdk.git
-pip install .
+pip install git+https://github.com/quantumz-io/veloxq_sdk.git
 ```
 
 > **NOTE:** It is recomended to install this package in a dedicated python environment to prevent any dependency problems.
