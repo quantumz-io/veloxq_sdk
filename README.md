@@ -378,18 +378,109 @@ Files are where your actual data is stored. You can create them from several inp
 
 #### 5.2.1 From a Local File Path
 
-Useful if you have an existing file in your filesystem (e.g., `.h5`, `.csv`, `.txt`, etc.).
+Different file formats (e.g., `.h5`, `.csv`, `.txt`, etc.) can be used to define the Ising model, each offering unique characteristics for representing dense or sparse data.
 
 ```python
 from veloxq_sdk import File
 
 # Suppose "my_problem" is a Problem instance
 file_obj = File.from_instance(
-    "path/to/local_data.h5",
+    "path/to/local_data.h5",  # Other formats also supported e.g., .csv, .mtx, .dat, .csv
     name="my_data.h5",        # Optional; defaults to the file’s basename
     problem=my_problem,       # Optional; defaults to Problem.undefined()
     force=True                # Overwrite if a file with the same name exists
 )
+```
+
+Below are the supported formats:
+
+##### 5.2.1.1 HDF5 Format
+
+HDF5 offers hierarchical, flexible data storage for diverse dataset sizes and types, with separate encoding formats for dense and sparse data.
+Each file must contain an `Ising` group with a `couplings` dataset for **dense** matrices or a `J_coo` group with `I`, `J`, and `V` datasets for **sparse** COO (Coordinate vectors) matrices, and a optional `biases` dataset, when not present biases are read where entries are `J = I` for both symmetric and triangular matrices.
+
+1) Dense format:
+    ```py
+    import h5py
+    import numpy as np
+
+    # Dense representation
+    with h5py.File('example_dense.h5', 'w') as f:
+        group = f.create_group("Ising")
+        group.create_dataset("couplings", data=np.array([[0, 0.5, 0.25], [0.5, 0, 0.75], [0.25, 0.75, 0]]))
+        group.create_dataset("biases", data=np.array([0.1, 0.2, 0.3]))
+    ```
+2) Sparse format:
+    ```py
+    import h5py
+    import numpy as np
+
+    # Sparse representation
+    with h5py.File('example_sparse.h5', 'w') as f:
+        group = f.create_group("Ising/J_coo")
+        group.create_dataset("I", data=np.array([1, 2, 3]))
+        group.create_dataset("J", data=np.array([2, 3, 1]))
+        group.create_dataset("V", data=np.array([0.5, 0.75, 0.25]))
+        group.parent.create_dataset("biases", data=np.array([0.1, 0.2, 0.3]))  # biases dataset is defined in the `Ising` group
+    ```
+
+##### 5.2.1.2 MAT format
+
+MAT files (native to MATLAB), similarly to HDF5 format, encodes the Ising model using either dense matrices labeled `couplings` or sparse matrices using coordinate format vectors `I`, `J`, and `V`, as well as an optional `biases` vector. 
+
+1) Dense format:
+  ```matlab
+  % Dense representation
+  couplings = [0 0.5 0.25; 0.5 0 0.75; 0.25 0.75 0];
+  biases = [0.1; 0.2; 0.3];
+  save('example_dense.mat', 'couplings', 'biases');
+  ```
+
+2) Sparse format:
+  ```matlab
+  % Sparse COO representation
+  I = [1; 2; 3];
+  J = [2; 3; 1];
+  V = [0.5; 0.75; 0.25];
+  save('example_sparse.mat', 'I', 'J', 'V', 'biases');
+  ```
+
+
+##### 5.2.1.3 MTX Format
+
+Matrix Market (MTX) format, differently from MAT and HDF5 format, encodes **Maximum Weighted Matching** problems using a coordinate format. The MTX format can include a header defining the Matrix Market format and comments starting with `%`. After the header and comments, the first non-commented line must specify the **matrix dimensions** and **non-zero element count** sperated by space, while the followings must specify the non-zero entries, with a triplet defining the **row**, **column**, and **value** (optional, defaults to `1`).
+
+```mtx
+%%MatrixMarket matrix coordinate real general
+% rows cols non-zero-elements
+% i j val
+3 3 4
+1 2 0.5
+2 3 1.5
+1 1
+3 2 0.75
+```
+
+#### 5.2.1.4 DAT Format
+The DAT text file format specifically encodes dense matrices of **Traveling Salesman Problem (TSP)** case descriptions. The file structure starts with the first line containing a **single integer**, which specifies the **dimension** of the two subsequent square matrices written in the following lines: the **flow matrix** and the **distance matrix**.
+
+```dat
+2
+1 2
+3 4
+5 6
+7 8
+```
+
+#### 5.2.1.5 CSV or plain text Format
+
+The CSV format, or any other plain text, stores a Ising model matrix in a COO sparse format. The `I`, `J` and `V` vectors of the sparse matrix are stored as separate columns using space as delimiter and `#` as comment marker. The biases are infered from the entries where `J = I`.
+
+```plaintext
+# node1 node2 weight
+1 2 0.5
+2 3 0.75
+3 1 0.25
 ```
 
 #### 5.2.2 From Dictionaries of Biases and Couplings
