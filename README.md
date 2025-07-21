@@ -57,7 +57,13 @@ pip install .
 
 ## 2. Quickstart
 
-The simplest approach is using `solver.sample(...)`, which:
+Before executing any code from the API make sure that you have a proper **API key** configured. The easiest way to load the api key is using the environment variables:
+
+```shell
+export VELOX_TOKEN="12345678-90ab-cdef-1234-567890abcdef"
+```
+
+Then to solve your problem, the simplest approach is using `solver.sample(...)`, which:
 
 1. Creates a `File` (see below) for your problem instance (biases and couplings defined as lists, NumPy arrays, dictionaries, file paths, etc.).
 2. Automatically submits a job to the VeloxQ platform.
