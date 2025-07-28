@@ -1,6 +1,14 @@
 # VeloxQ SDK: Documentation & Usage Guide
 
-This project provides a configurable Python client interface for submitting and managing quantum or classical computational jobs via the VeloxQ platform. Users can easily configure their environment, select solvers/backends, define problem instances in various formats, and retrieve results (including HDF5-based data). This guide covers usage from initial setup through job submission and retrieval.
+This project provides a configurable Python API to interact with the VeloxQ platform, designed to provide users with a **powerful**, **robust** and **user-friendly** interface to upload and solve complex
+optimization problems using an extensive list of physics-inspired and metaheuristic algorithms.
+
+The primary components of the API include Jobs, Solvers, and Problems:
+1. **Jobs**: A 'job' in this context refers to a specific execution of a solver on a problem.
+2. **Solvers**: The solvers are the algorithms used to solve the optimization problems executed on a specific backend. The solvers can be configured with a wide array of parameters that help in fine-tuning the solver's behavior, offering a high degree of customization for different types of optimization problems.
+3. **Problems**: Problems are the specific computational task at hand, composed by multiple files in various formats that contains the problem data.
+
+This guide covers usage from initial setup through job submission and retrieval.
 
 ---
 
