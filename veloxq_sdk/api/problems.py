@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryFile
 
+import httpx
 import h5py
 import numpy as np
 from dimod import BinaryQuadraticModel
@@ -93,7 +94,12 @@ class Problem(BaseModel):
             list[File]: A list of files that belong to this problem.
 
         """
-        params: dict[str, int | str] = {'_page': 1, '_limit': limit}
+        params: dict[str, int | str] = {
+            '_page': 1,
+            '_limit': limit,
+            '_sort': 'created_at',
+            'order': 'desc',
+        }
         if name:
             params['q'] = name
 
@@ -114,6 +120,20 @@ class Problem(BaseModel):
 
         """
         return File.create(name=name, size=size, problem=self)
+
+    def delete(self):
+        """Delete this problem from the VeloxQ platform.
+
+        Raises:
+            ValueError: If the problem cannot be deleted.
+
+        """
+        response = self._http.delete(f'problems/{self.id}')
+        try:
+            response.raise_for_status()
+        except BaseException as e:
+            msg = f'Failed to delete problem {self.id}'
+            raise ValueError(msg) from e
 
     @classmethod
     def undefined(cls) -> Problem:
@@ -171,11 +191,11 @@ class Problem(BaseModel):
         return [cls.model_validate(item) for item in data]
 
     @classmethod
-    def from_id(cls, problem_id: int) -> Problem:
-        """Create a Problem instance from an integer ID.
+    def from_id(cls, problem_id: str) -> Problem:
+        """Create a Problem instance from an ID.
 
         Args:
-            problem_id (int): The unique problem ID in the VeloxQ system.
+            problem_id (str): The unique problem ID in the VeloxQ system.
 
         Returns:
             Problem: The matching Problem object, if found.
@@ -243,7 +263,7 @@ class File(BaseModel):
         """
         download_url = self.http.get(f'problems/{self.problem.id}/files/{self.id}')
         download_url.raise_for_status()
-        with self.http.stream('GET', download_url.text) as response:
+        with httpx.stream('GET', download_url.text.strip('"')) as response:
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
@@ -537,7 +557,13 @@ class File(BaseModel):
             if (ext_idx := name.find('.')) != -1:
                 name = name[:ext_idx]
             name += '.h5'
-            if not force and (existing_files := cls.get_files(name=name, limit=1)):
+
+            if problem is None:
+                existing_files = cls.get_files(name=name, limit=1)
+            else:
+                existing_files = problem.get_files(name=name, limit=1)
+
+            if not force and existing_files:
                 return existing_files[0]
 
         with TemporaryFile() as temp_file:
@@ -560,7 +586,11 @@ class File(BaseModel):
             temp_file.seek(0)
 
             name = name or (cls._create_hash(temp_file) + '.h5')
-            if not force and (existing_files := cls.get_files(name=name, limit=1)):
+            if problem is None:
+                existing_files = cls.get_files(name=name, limit=1)
+            else:
+                existing_files = problem.get_files(name=name, limit=1)
+            if not force and existing_files:
                 return existing_files[0]
 
             temp_file.seek(0)
@@ -605,7 +635,10 @@ class File(BaseModel):
             raise FileNotFoundError(msg)
         name = name or path.name
 
-        existing_files = cls.get_files(name=name, limit=1)
+        if problem is None:
+            existing_files = cls.get_files(name=name, limit=1)
+        else:
+            existing_files = problem.get_files(name=name, limit=1)
         if existing_files and not force:
             return existing_files[0]
 
@@ -651,7 +684,10 @@ class File(BaseModel):
         if name.find('.') == -1:
             name += f'.{extension}'
 
-        existing_files = cls.get_files(name=name, limit=1)
+        if problem is None:
+            existing_files = cls.get_files(name=name, limit=1)
+        else:
+            existing_files = problem.get_files(name=name, limit=1)
         if existing_files and not force:
             return existing_files[0]
 

@@ -343,7 +343,7 @@ class Job(BaseModel):
 
         """
         self.refresh()
-        if self.status != JobStatus.COMPLETED.value:
+        if self.status != JobStatus.COMPLETED:
             msg = f'Job {self.id} has not completed successfully.'
             raise RuntimeError(msg)
 
@@ -455,7 +455,7 @@ class VeloxSampleSet(SampleSet):
         return self.record.sample
 
     @classmethod
-    def from_result(cls, file: h5py.File) -> VeloxSampleSet:
+    def from_result(cls, file: h5py.File, job_id: str | None = None) -> VeloxSampleSet:
         """Create a VeloxSampleSet from an HDF5 file.
 
         Args:
@@ -472,6 +472,7 @@ class VeloxSampleSet(SampleSet):
             energy=energies,
             vartype=SPIN,
             info={
+                'job_id': job_id or '',
                 'num_batches': file['Spectrum/num_batches'][()],
                 **json.loads(file['Spectrum/metadata'][()])
             },
