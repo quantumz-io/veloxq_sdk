@@ -19,9 +19,10 @@ import h5py
 from dimod.sampleset import SampleSet
 from dimod.vartypes import SPIN
 import numpy as np
-from pydantic import Field
+from pydantic import Field, BeforeValidator
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel
+from veloxq_sdk.api.problems import File
 
 
 class LogCategory(Enum):
@@ -259,6 +260,10 @@ class Job(BaseModel):
         alias='results',
         default=None,
         description='Metadata about the results of the job execution.',
+    )
+
+    file: t.Annotated[File, BeforeValidator(File.model_validate)] = Field(
+        description='The input file associated with the job.',
     )
 
     def wait_for_completion(self, timeout: float | None = None) -> None:
