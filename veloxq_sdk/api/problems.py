@@ -82,24 +82,33 @@ class Problem(BaseModel):
     created_at: datetime = Field(description='The date and time when the problem was created.')
     updated_at: datetime = Field(description='The date and time when the problem was last updated.')
 
-    def get_files(self, name: str | None = None, limit: int = 1000) -> list[File]:
+    def get_files(self, name: str | None = None, limit: int = 1000, *, exact: bool = False) -> list[File]:
         """Get all files associated with this problem.
 
         Args:
             name (str | None): Optional query string to filter files by name.
             limit (int): Maximum number of files to return (default 1000).
+            exact (bool): If True, only return files with names exactly matching
+                          the provided name.
 
         Returns:
             list[File]: A list of files that belong to this problem.
 
         """
-        params: dict[str, int | str] = {'_page': 1, '_limit': limit}
+        params: dict[str, int | str] = {
+            '_limit': limit,
+            '_sort': 'created_at',
+            'order': 'desc',
+        }
         if name:
             params['q'] = name
 
         response = self._http.get(f'problems/{self.id}/files', params=params)
         response.raise_for_status()
-        data = response.json()['data']
+        if exact:
+            data = filter(lambda item: item['name'] == name, response.json()['data'])
+        else:
+            data = response.json()['data']
         return [File.model_validate(item) for item in data]
 
     def new_file(self, name: str, size: int) -> File:
@@ -296,16 +305,17 @@ class File(BaseModel):
         return cls.model_validate(data)
 
     @classmethod
-    def get_files(cls, name: str | None, limit: int = 1000) -> list[File]:
+    def get_files(cls, name: str | None, limit: int = 1000, *, exact: bool = False) -> list[File]:
         """Get all user files, optionally filtered by name.
 
         Args:
             name (str | None): Optional query string to filter files by name.
             limit (int): Maximum number of files to return. Default is 1000.
+            exact (bool): If True, only return files with names exactly matching
+                                the provided name.
 
         """
         params: dict[str, int | str] = {
-            '_page': 1,
             '_limit': limit,
             '_sort': 'created_at',
             'order': 'desc',
@@ -315,8 +325,31 @@ class File(BaseModel):
 
         response = cls._http.get('files', params=params)
         response.raise_for_status()
-        data = response.json()['data']
+        if exact:
+            data = filter(lambda item: item['name'] == name, response.json()['data'])
+        else:
+            data = response.json()['data']
         return [cls.model_validate(item) for item in data]
+
+    @classmethod
+    def get_file(cls, name: str, problem: Problem | None = None) -> File | None:
+        """Get a single File instance by name.
+
+        Args:
+            name (str): The name of the file to retrieve.
+            problem (Problem | None): Optional Problem to scope the search within.
+
+        Returns:
+            File | None: The matching File object, or None if not found.
+
+        """
+        if problem is None:
+            problem = Problem.undefined()
+
+        existing_files = problem.get_files(name=name, limit=1, exact=True)
+        if existing_files:
+            return existing_files[0]
+        return None
 
     @classmethod
     def from_id(cls, file_id: str) -> File:
@@ -537,8 +570,8 @@ class File(BaseModel):
             if (ext_idx := name.find('.')) != -1:
                 name = name[:ext_idx]
             name += '.h5'
-            if not force and (existing_files := cls.get_files(name=name, limit=1)):
-                return existing_files[0]
+            if not force and (file := cls.get_file(name=name, problem=problem)):
+                return file
 
         with TemporaryFile() as temp_file:
             if isinstance(biases, Linear) and isinstance(couplings, Quadratic):
@@ -560,8 +593,8 @@ class File(BaseModel):
             temp_file.seek(0)
 
             name = name or (cls._create_hash(temp_file) + '.h5')
-            if not force and (existing_files := cls.get_files(name=name, limit=1)):
-                return existing_files[0]
+            if not force and (file := cls.get_file(name=name, problem=problem)):
+                return file
 
             temp_file.seek(0)
 
@@ -605,9 +638,8 @@ class File(BaseModel):
             raise FileNotFoundError(msg)
         name = name or path.name
 
-        existing_files = cls.get_files(name=name, limit=1)
-        if existing_files and not force:
-            return existing_files[0]
+        if not force and (file := cls.get_file(name=name, problem=problem)):
+            return file
 
         new_file = cls.create(name=name, size=path.stat().st_size, problem=problem)
         with path.open('rb') as file_content:
@@ -651,9 +683,8 @@ class File(BaseModel):
         if name.find('.') == -1:
             name += f'.{extension}'
 
-        existing_files = cls.get_files(name=name, limit=1)
-        if existing_files and not force:
-            return existing_files[0]
+        if not force and (file := cls.get_file(name=name, problem=problem)):
+            return file
 
         new_file = cls.create(name=name, size=data.seek(0, 2), problem=problem)
         data.seek(0)
