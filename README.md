@@ -49,6 +49,7 @@ This guide covers usage from initial setup through job submission and retrieval.
   - [8. Accessing Results](#8-accessing-results)
     - [8.1 Direct Access via `VeloxSampleSet`](#81-direct-access-via-veloxsampleset)
     - [8.2 Downloading the Result File](#82-downloading-the-result-file)
+  - [9. Hybrid Workflows (dwave-hybrid)](#9-hybrid-workflows-dwave-hybrid)
 
 ---
 
@@ -902,5 +903,43 @@ with open("my_results.hdf5", "wb") as f:
 with h5py.File("my_result.hdf5", "r") as data:
     states = data["Spectrum/states"][:]
 ```
+
+---
+
+## 9. Hybrid Workflows (dwave-hybrid)
+
+VeloxQ solvers can participate in [dwave-hybrid](https://docs.dwavequantum.com/en/latest/ocean/api_ref_hybrid/api_ref.html) workflows via the `VeloxHybridRunnable` runnable. Install the optional extra and wire the sampler into your flow:
+
+```shell
+pip install "veloxq_sdk[hybrid]"
+```
+
+```python
+import dimod
+import hybrid
+from hybrid.flow import ArgMin, RacingBranches
+
+from veloxq_sdk.hybrid import VeloxHybridRunnable
+from veloxq_sdk.solvers import SBMSolver
+
+# Define your problem as a BQM
+bqm = dimod.BinaryQuadraticModel({'x': 1.0, 'y': -1.0}, {('x', 'y'): -1.0}, 0, dimod.SPIN)
+
+# Define the solver
+velox_solver = SBMSolver(parameters=SBMSolverParameters(num_steps=4000))
+
+# Combine a local heuristic with the VeloxQ solver
+workflow = ArgMin(
+  RacingBranches(
+    hybrid.samplers.TabuProblemSampler(timeout=3),
+    VeloxHybridRunnable(solver=velox_solver),
+  )
+)
+
+state = workflow.run(hybrid.State.from_problem(bqm)).result()
+print(state.samples.first)
+```
+
+`VeloxHybridRunnable` accepts any `BaseSolver` instance (defaults to `VeloxQSolver`) and returns a `dimod.SampleSet`, so it can be mixed with other Ocean components in branching and racing constructs.
 
 ---
