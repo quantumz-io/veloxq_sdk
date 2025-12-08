@@ -920,13 +920,13 @@ import hybrid
 from hybrid.flow import ArgMin, RacingBranches
 
 from veloxq_sdk.hybrid import VeloxHybridRunnable
-from veloxq_sdk.solvers import SBMSolver
+from veloxq_sdk.solvers import SBMSolver, SBMParameters
 
 # Define your problem as a BQM
 bqm = dimod.BinaryQuadraticModel({'x': 1.0, 'y': -1.0}, {('x', 'y'): -1.0}, 0, dimod.SPIN)
 
 # Define the solver
-velox_solver = SBMSolver(parameters=SBMSolverParameters(num_steps=4000))
+velox_solver = SBMSolver(parameters=SBMParameters(num_steps=4000))
 
 # Combine a local heuristic with the VeloxQ solver
 workflow = ArgMin(
