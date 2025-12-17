@@ -37,6 +37,9 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+hybrid = [
+    "dwave-hybrid>=0.6.10",
+]
 
 [project.scripts]
 spam-cli = "spam:main_cli"
