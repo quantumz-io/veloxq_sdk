@@ -98,7 +98,7 @@ class Problem(BaseModel):
         params: dict[str, int | str] = {
             '_limit': limit,
             '_sort': 'created_at',
-            'order': 'desc',
+            '_order': 'desc',
         }
         if name:
             params['q'] = name
@@ -318,7 +318,7 @@ class File(BaseModel):
         params: dict[str, int | str] = {
             '_limit': limit,
             '_sort': 'created_at',
-            'order': 'desc',
+            '_order': 'desc',
         }
         if name:
             params['q'] = name
