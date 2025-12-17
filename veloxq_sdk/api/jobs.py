@@ -472,13 +472,19 @@ class VeloxSampleSet(SampleSet):
         """
         samples = file['Spectrum/states']
         energies = file['Spectrum/energies']
+
+        info = {}
+
+        for key in file['Spectrum'].keys() - {'states', 'energies'}:
+            try:
+                info.update(**json.loads(file['Spectrum'][key][()]))
+            except TypeError:
+                info[key] = file['Spectrum'][key][()]
+
         return cls.from_samples(
             samples,
             energy=energies,
             vartype=SPIN,
-            info={
-                'num_batches': file['Spectrum/num_batches'][()],
-                **json.loads(file['Spectrum/metadata'][()])
-            },
+            info=info,
             aggregate_samples=True,
         )
