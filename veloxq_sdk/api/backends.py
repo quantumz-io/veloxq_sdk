@@ -21,3 +21,11 @@ class VeloxQH100_2(BaseBackend):
     """
 
     id: str = '1095cf2d-a3a0-4125-9615-45f2884e1aec'
+
+class PLGridG200(BaseBackend):
+    """PLGrid G200 backend for VeloxQ API.
+
+    GPU_COUNT: 4
+    """
+
+    id: str = '461405a2-a7e4-403a-ad0f-66affa98c26a'
