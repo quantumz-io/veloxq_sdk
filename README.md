@@ -3,6 +3,10 @@
 This project provides a configurable Python API to interact with the VeloxQ platform, designed to provide users with a **powerful**, **robust** and **user-friendly** interface to upload and solve complex
 optimization problems using an extensive list of physics-inspired and metaheuristic algorithms.
 
+Find additional guides on configuration, jobs, solvers and result files in the [VeloxQ SDK Wiki](https://github.com/quantumz-io/veloxq_sdk/wiki).
+
+---
+
 ## Installation & Setup
 
 Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.8+:
