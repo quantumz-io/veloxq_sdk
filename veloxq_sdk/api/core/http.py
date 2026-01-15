@@ -1,6 +1,6 @@
 import atexit
 import typing as t
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 import httpx
 from websockets.sync.client import ClientConnection, connect
@@ -20,6 +20,9 @@ class RestClient(httpx.Client):
         config.observe(self._update_url, names='url')
         self.headers[self.API_KEY_HEADER] = config.token
         self.base_url = config.url
+        self.event_hooks = {
+            'response': [self.update_response_reason],
+        }
 
     def _update_token(self, change: dict) -> None:
         """Update the API token in the headers."""
@@ -54,6 +57,19 @@ class RestClient(httpx.Client):
         with connect(str(url)) as ws:
             yield ws  # type: ignore[return]
 
+    @staticmethod
+    def update_response_reason(response: httpx.Response) -> None:
+        """Update the reason phrase of the response based on its content."""
+        if response.is_success:
+            return
+        message = ''
+        with suppress(Exception):
+            message = response.read()
+        try:
+            response.extensions['reason_phrase'] = response.json().get('message', '').encode('ascii')
+        except Exception:
+            if message:
+                response.extensions['reason_phrase'] = message
 
 class ClientMixin:
     """Mixin class to provide HTTP client functionality."""
