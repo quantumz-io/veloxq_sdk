@@ -5,7 +5,7 @@ __version__ = '1.0.1dev2'
 from veloxq_sdk.backends import (
     VeloxQH100_1,
     VeloxQH100_2,
-    PLGridG200,
+    PLGridGH200,
 )
 from veloxq_sdk.jobs import Job
 from veloxq_sdk.problems import File, Problem
@@ -22,7 +22,7 @@ __all__ = [
     'Problem',
     'VeloxQH100_1',
     'VeloxQH100_2',
-    'PLGridG200',
+    'PLGridGH200',
     'VeloxQParameters',
     'VeloxQSolver',
     'SBMParameters',
