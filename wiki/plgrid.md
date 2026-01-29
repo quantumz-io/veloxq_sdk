@@ -4,8 +4,8 @@ PLGrid users with eligible grants can run the VeloxQ Solver on PLGrid infrastruc
 
 ## Connect Your PLGrid Account
 
-1. Open https://web-dev.veloxq.com/login and choose **Login with PLGrid**.
-2. After linking, generate an API key in https://web-dev.veloxq.com/user/settings if you do not already have one.
+1. Open https://web.veloxq.com/login and choose **Login with PLGrid**.
+2. After linking, generate an API key in https://web.veloxq.com/user/settings if you do not already have one.
 3. Provide the token to the SDK (e.g., set the `VELOX_TOKEN` environment variable). See [configuration.md](configuration.md) for alternative configuration options.
 
 ## Supported Backends
@@ -42,7 +42,8 @@ with open("result.h5", "wb") as f:
 Run the script with your token available to the SDK, for example:
 
 ```shell
-VELOX_TOKEN=<token> python example.py
+export VELOX_TOKEN=<token>
+python example.py
 ```
 
 >For more details on the SDK usage, see [Defining Problems & Files](problems-and-files.md), [Submitting Jobs](jobs.md), and [Accessing Results](results.md).
