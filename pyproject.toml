@@ -42,7 +42,7 @@ dev = [
 spam-cli = "spam:main_cli"
 
 [tool.setuptools]
-packages = ["veloxq_sdk"]
+packages = {find = {include = ["veloxq_sdk", "veloxq_sdk.*"]}}
 
 [tool.setuptools.dynamic]
 version = {attr = "veloxq_sdk.__version__"}
