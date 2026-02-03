@@ -17,9 +17,9 @@ import h5py
 import numpy as np
 from dimod import BinaryQuadraticModel
 from dimod.views.quadratic import Linear, Quadratic
-from pydantic import Field
+from pydantic import Field, TypeAdapter
 
-from veloxq_sdk.api.core.base import BaseModel
+from veloxq_sdk.api.core.base import BaseModel, build_adapters
 
 InstanceLike = t.Union[
     'InstanceDict',
@@ -64,6 +64,7 @@ class InstanceDict(t.TypedDict):
     couplings: CouplingsType
 
 
+@build_adapters
 class Problem(BaseModel):
     """A class representing a problem in the VeloxQ API.
 
@@ -105,11 +106,12 @@ class Problem(BaseModel):
 
         response = self._http.get(f'problems/{self.id}/files', params=params)
         response.raise_for_status()
+        data = File._from_paginated_response(response)
+
         if exact:
-            data = filter(lambda item: item['name'] == name, response.json()['data'])
-        else:
-            data = response.json()['data']
-        return [File.model_validate(item) for item in data]
+            return list(filter(lambda item: item.name == name, data))
+
+        return data
 
     def new_file(self, name: str, size: int) -> File:
         """Create a new file for this problem.
@@ -136,9 +138,9 @@ class Problem(BaseModel):
         """
         response = cls._http.get('problems', params={'_page': 1, '_limit': 1, 'q': 'undefined'})
         response.raise_for_status()
-        data = response.json()['data']
+        data = cls._from_paginated_response(response)
         if data:
-            return cls.model_validate(data[0])
+            return data[0]
 
         return cls.create(name='undefined')
 
@@ -154,12 +156,10 @@ class Problem(BaseModel):
 
         """
         response = cls._http.post('problems', json={'name': name})
-        response.raise_for_status()
-        data = response.json()
-        return cls.model_validate(data)
+        return cls._from_response(response)
 
     @classmethod
-    def get_problems(cls, name: str | None = None, limit: int = 1000) -> list[Problem]:
+    def get_problems(cls, name: str | None = None, limit: int = 1000) -> t.Sequence[Problem]:
         """Get all user problems, optionally filtering by name.
 
         Args:
@@ -176,8 +176,7 @@ class Problem(BaseModel):
 
         response = cls._http.get('problems', params=params)
         response.raise_for_status()
-        data = response.json()['data']
-        return [cls.model_validate(item) for item in data]
+        return cls._from_paginated_response(response)
 
     @classmethod
     def from_id(cls, problem_id: int) -> Problem:
@@ -191,11 +190,10 @@ class Problem(BaseModel):
 
         """
         response = cls._http.get(f'problems/{problem_id}')
-        response.raise_for_status()
-        data = response.json()
-        return cls.model_validate(data)
+        return cls._from_response(response)
 
 
+@build_adapters
 class File(BaseModel):
     """A class representing a file in the VeloxQ API [2].
 
@@ -217,7 +215,7 @@ class File(BaseModel):
     name: str
     size: int = Field(description='The size of the file in bytes.')
     uploaded_bytes: int = Field(description='The number of bytes that have been uploaded.')
-    problem: Problem = Field(description='The problem associated with this file.')
+    problem_id: str = Field(description='The problem id associated with this file.')
     created_at: datetime = Field(description='The date and time when the file was created.')
     updated_at: t.Optional[datetime] = Field(
         default=None,
@@ -234,7 +232,7 @@ class File(BaseModel):
 
         """
         with self.http.open_ws(
-            f'problems/{self.problem.id}/files/{self.id}/upload/ws',
+            f'problems/{self.problem_id}/files/{self.id}/upload/ws',
         ) as ws:
             while data := content.read(chunk_size):
                 ws.send(data)
@@ -250,7 +248,7 @@ class File(BaseModel):
             chunk_size (int): Size of the data chunks to read. Defaults to 1 MB.
 
         """
-        download_url = self.http.get(f'problems/{self.problem.id}/files/{self.id}')
+        download_url = self.http.get(f'problems/{self.problem_id}/files/{self.id}')
         download_url.raise_for_status()
         with self.http.stream('GET', download_url.text.strip("'").strip('"')) as response:
             response.raise_for_status()
@@ -259,23 +257,21 @@ class File(BaseModel):
 
     def cancel(self) -> None:
         """Cancel the file upload on the VeloxQ platform."""
-        response = self._http.delete(f'problems/{self.problem.id}/files/{self.id}/cancel')
+        response = self._http.delete(f'problems/{self.problem_id}/files/{self.id}/cancel')
         response.raise_for_status()
         self.refresh()
 
     def delete(self) -> None:
         """Delete this file from the VeloxQ platform."""
-        response = self._http.delete(f'problems/{self.problem.id}/files/{self.id}')
+        response = self._http.delete(f'problems/{self.problem_id}/files/{self.id}')
         response.raise_for_status()
 
     def refresh(self) -> None:
         """Refresh the file data from the API."""
         response = self._http.get(
-            f'/problems/{self.problem.id}/files/{self.id}/upload-status',
+            f'/problems/{self.problem_id}/files/{self.id}/upload-status',
         )
-        response.raise_for_status()
-        data = response.json()
-        self.model_update(data)
+        self._update_from_response(response)
 
     @classmethod
     def create(cls, name: str, size: int, problem: Problem | None = None) -> File:
@@ -299,13 +295,10 @@ class File(BaseModel):
             f'problems/{problem.id}/files/upload-request',
             json={'file_name': name, 'size': size},
         )
-        response.raise_for_status()
-        data = response.json()
-        data['problem'] = problem
-        return cls.model_validate(data)
+        return cls._from_response(response)
 
     @classmethod
-    def get_files(cls, name: str | None, limit: int = 1000, *, exact: bool = False) -> list[File]:
+    def get_files(cls, name: str | None, limit: int = 1000, *, exact: bool = False) -> t.Sequence[File]:
         """Get all user files, optionally filtered by name.
 
         Args:
@@ -325,11 +318,10 @@ class File(BaseModel):
 
         response = cls._http.get('files', params=params)
         response.raise_for_status()
+        data = cls._from_paginated_response(response)
         if exact:
-            data = filter(lambda item: item['name'] == name, response.json()['data'])
-        else:
-            data = response.json()['data']
-        return [cls.model_validate(item) for item in data]
+            return list(filter(lambda item: item.name == name, data))
+        return data
 
     @classmethod
     def get_file(cls, name: str, problem: Problem | None = None) -> File | None:
@@ -366,9 +358,7 @@ class File(BaseModel):
 
         """
         response = cls._http.get(f'files/{file_id}')
-        response.raise_for_status()
-        data = response.json()
-        return cls.model_validate(data)
+        return cls._from_response(response)
 
     @classmethod
     def from_instance(
@@ -690,22 +680,6 @@ class File(BaseModel):
         data.seek(0)
         new_file.upload(data)
         return new_file
-
-    @classmethod
-    def model_validate(
-        cls,
-        obj: dict[str, t.Any],
-        *,
-        strict: bool | None = None,
-        from_attributes: bool | None = None,
-        context: t.Any = None,
-    ) -> File:
-        """Override model_validate to handle Problem association."""
-        if 'problem' not in obj:
-            obj['problem'] = Problem.from_id(obj['problemId'])
-        return super().model_validate(
-            obj, strict=strict, from_attributes=from_attributes, context=context,
-        )
 
     @staticmethod
     def _create_hash(

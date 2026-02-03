@@ -21,7 +21,7 @@ from dimod.vartypes import SPIN
 import numpy as np
 from pydantic import Field, BeforeValidator
 
-from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel
+from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
 from veloxq_sdk.api.problems import File
 
 
@@ -176,7 +176,7 @@ class JobResultDataItem(BasePydanticModel):
 
     name: str
     label: str
-    values: t.List[t.Union[float, str]] = []
+    values: list[t.Union[float, str]] = []
 
 
 class JobResultData(BasePydanticModel):
@@ -189,7 +189,7 @@ class JobResultData(BasePydanticModel):
     """
 
     type: JobResultType
-    items: t.List[JobResultDataItem] = []
+    items: list[JobResultDataItem] = []
 
 
 class JobParameterSchema(BasePydanticModel):
@@ -205,6 +205,7 @@ class JobParameterSchema(BasePydanticModel):
     value: t.Any
 
 
+@build_adapters
 class JobLogsRow(BasePydanticModel):
     """Represents a job log entry.
 
@@ -223,6 +224,7 @@ class JobLogsRow(BasePydanticModel):
         return f'{self.timestamp} [{self.category}] {self.message}'
 
 
+@build_adapters
 class Job(BaseModel):
     """A class representing a job in the VeloxQ API platform.
 
@@ -252,7 +254,7 @@ class Job(BaseModel):
         default_factory=JobStatistics,
         description='Statistics about the job execution.',
     )
-    timeline: t.List[JobTimelineValue] = Field(
+    timeline: list[JobTimelineValue] = Field(
         default_factory=list,
         description='Timeline of the job status changes.',
     )
@@ -277,6 +279,8 @@ class Job(BaseModel):
             TimeoutError: If the job does not complete by 'timeout' seconds.
 
         """
+        if self.status in {JobStatus.COMPLETED.value, JobStatus.FAILED.value}:
+            return
         start_time = time.monotonic()
         with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
             waiting = True
@@ -324,8 +328,7 @@ class Job(BaseModel):
 
         response = self.http.get(f'jobs/{self.id}/logs', params=params)
         response.raise_for_status()
-        data = response.json()
-        return [JobLogsRow.model_validate(item) for item in data]
+        return JobLogsRow._from_list_response(response)
 
     @cached_property
     def result(self) -> VeloxSampleSet:
@@ -372,7 +375,7 @@ class Job(BaseModel):
         status: JobStatus | None = None,
         created_at: PeriodFilter | None = None,
         limit: int = 1000,
-    ) -> list[Job]:
+    ) -> t.Sequence[Job]:
         """Get a list of jobs from the server.
 
         Args:
@@ -391,9 +394,7 @@ class Job(BaseModel):
             params['createdAt'] = created_at.value
 
         response = cls._http.get('jobs', params=params)
-        response.raise_for_status()
-        data = response.json()['data']
-        return [cls.model_validate(item) for item in data]
+        return cls._from_paginated_response(response)
 
     @classmethod
     def from_id(cls, job_id: str) -> "Job":
@@ -407,8 +408,7 @@ class Job(BaseModel):
 
         """
         response = cls._http.get(f'jobs/{job_id}')
-        response.raise_for_status()
-        return cls.model_validate(response.json())
+        return cls._from_response(response)
 
     def _get_temp_result(self) -> Path:
         """Get the temporary cached result file.

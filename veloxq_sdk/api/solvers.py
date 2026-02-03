@@ -172,7 +172,7 @@ class BaseSolver(BaseModel):
 
         """
         job_body = {
-            'problemId': file.problem.id,
+            'problemId': file.problem_id,
             'solvers': [{
                 'solverId': self.id,
                 'backendId': self.backend.id,
@@ -182,8 +182,8 @@ class BaseSolver(BaseModel):
                 ),
             }],
         }
-        result = self.http.post('jobs', json=job_body)
-        return Job._from_response(result)[0]  # noqa: SLF001 # type: ignore[return-value]
+        response = self.http.post('jobs', json=job_body)
+        return Job._from_list_response(response)[0]
 
 
 class VeloxQParameters(PydanticBaseModel):
