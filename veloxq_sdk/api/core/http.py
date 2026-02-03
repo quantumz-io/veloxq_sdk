@@ -23,6 +23,7 @@ class RestClient(httpx.Client):
         self.event_hooks = {
             'response': [self.update_response_reason],
         }
+        self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
 
     def _update_token(self, change: dict) -> None:
         """Update the API token in the headers."""
