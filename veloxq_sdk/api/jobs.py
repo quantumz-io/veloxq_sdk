@@ -350,10 +350,11 @@ class Job(BaseModel):
                 Default is 1 MB.
 
         """
-        self.refresh()
         if self.status != JobStatus.COMPLETED.value:
-            msg = f'Job {self.id} has not completed successfully.'
-            raise RuntimeError(msg)
+            self.refresh()  # Refresh the job status before checking again
+            if self.status != JobStatus.COMPLETED.value:
+                msg = f'Job {self.id} has not completed successfully.'
+                raise RuntimeError(msg)
 
         download_url = self.http.get(f'jobs/{self.id}/result')
         download_url.raise_for_status()
