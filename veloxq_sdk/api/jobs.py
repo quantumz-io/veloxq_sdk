@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import gettempdir
 
 import h5py
+from dateutil.parser import isoparse
 from dimod.sampleset import SampleSet
 from dimod.vartypes import SPIN
 import numpy as np
@@ -282,6 +283,7 @@ class Job(BaseModel):
         if self.status in {JobStatus.COMPLETED.value, JobStatus.FAILED.value}:
             return
         start_time = time.monotonic()
+        status_update = {}
         with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
             waiting = True
             while waiting:
@@ -291,9 +293,11 @@ class Job(BaseModel):
                         f'out after {timeout} seconds.'
                     )
                     raise TimeoutError(msg)
-                message = json.loads(ws.recv())
-                waiting = not message['finished']
-        self.refresh()
+                status_update = json.loads(ws.recv())
+                waiting = not status_update['finished']
+
+        self.status = status_update['timeline'][-1]['name']
+        self.updated_at = isoparse(status_update['timeline'][-1]['value'])
 
     def get_job_logs(
         self,

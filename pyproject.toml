@@ -21,6 +21,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "python-dateutil>=2.8.0",
     "traitlets>=5.0.0",
     "httpx>=0.28.0",
     "websockets>=13.0.0",
