@@ -60,7 +60,7 @@ class VeloxQAPIConfig(SingletonConfigurable):
     name = 'veloxq-api-sdk'
 
     url = Unicode(
-        default_value=os.environ.get('VELOXQ_API_URL', 'https://api-dev.veloxq.com'),
+        default_value=os.environ.get('VELOXQ_API_URL', 'https://api.veloxq.com'),
         config=True,
         help='Base URL for the VeloxQ API.',
     )
