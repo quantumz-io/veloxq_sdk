@@ -36,3 +36,4 @@ This docs covers usage from initial setup through job submission and retrieval.
 - [Accessing Results](results.md#accessing-results)
   - [Direct Access via VeloxSampleSet](results.md#1-direct-access-via-veloxsampleset)
   - [Downloading the Result File](results.md#2-downloading-the-result-file)
+- [PLGrid Integration](plgrid.md#connect-your-plgrid-account)
