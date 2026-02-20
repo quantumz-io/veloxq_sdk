@@ -138,14 +138,44 @@ df = job.result.to_pandas_dataframe()
 print(df.describe())
 ```
 
-## 2. Downloading the Result File
+## 2. HDF5 Result
+
+### 2.1 Downloading the Result File
 
 To manually download to a custom location and access the hdf5 data.
 
 ```python
-with open("my_results.hdf5", "wb") as f:
+with open("result.hdf5", "wb") as f:
     job.download_result(f, chunk_size=1024*1024)
 
-with h5py.File("my_result.hdf5", "r") as data:
+with h5py.File("result.hdf5", "r") as data:
     states = data["Spectrum/states"][:]
+```
+
+### 2.2 HDF5 Result Structure
+
+Result files downloaded from PLGrid backends are HDF5 files with a `Spectrum` group containing the sampled solutions and metadata:
+
+- `Spectrum/energies` (`float32`, shape `(num_samples,)`): energy value for each sample.
+- `Spectrum/states` (`int8`, shape `(num_samples, num_variables)`): spin states for each sample, using ±1 encoding.
+- `Spectrum/L` (`int64`): number of variables in the submitted problem.
+- `Spectrum/num_batches` (`int64`): number of solver batches executed.
+- `Spectrum/num_rep` (`int64`): number of repetitions performed.
+- `Spectrum/metadata` (`bytes`): solver metadata (implementation-specific).
+
+Example: read the lowest-energy sample directly from the downloaded result file.
+
+```python
+import h5py
+import numpy as np
+
+with h5py.File("result.h5", "r") as data:
+    energies = data["Spectrum/energies"][:]
+    states = data["Spectrum/states"][:]
+    idx = int(np.argmin(energies))
+    best_energy = energies[idx]
+    best_state = states[idx]
+
+    print("Best energy:", best_energy)
+    print("State:", best_state)
 ```
