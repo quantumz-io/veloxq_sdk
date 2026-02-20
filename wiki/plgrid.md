@@ -60,4 +60,20 @@ export VELOX_TOKEN=<token>
 python example.py
 ```
 
+## Accesing the Job results
+
+In order to get the **energy** value and spins **states** for each sample from your submited problem, you must access the saved HDF5 result file and read it's `Spectrum/energies` and `Spectrum/states` datasets, or simply use the *SampleSet* returned from `job.result` with `job.result.energy` and `job.result.sample`.
+
+```py
+# Accessing energy and states from HDF5 result file
+import h5py
+
+with h5py.File("result.h5", "r") as data:
+    energies = data["Spectrum/energies"][:]
+    states = data["Spectrum/states"][:]
+
+print("Energies:", energies)
+print("States:", states)
+```
+
 >For more details on the SDK usage, see [Defining Problems & Files](problems-and-files.md), [Submitting Jobs](jobs.md), and [Accessing Results](results.md).
