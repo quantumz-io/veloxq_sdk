@@ -17,26 +17,40 @@ PLGrid users with eligible grants can run the VeloxQ Solver on PLGrid infrastruc
 The example below loads a SPIN BQM from a COO file, submits it to the PLGrid backend, waits for completion, and downloads the result file.
 
 ```python
+from urllib import request
+
 import dimod
 from dimod.serialization import coo
 from veloxq_sdk import VeloxQSolver, File, PLGridGH200
 
-# load_config(".config.py")  # optional if you prefer file-based configuration
+# optional if you prefer file-based configuration; see https://github.com/quantumz-io/veloxq_sdk/wiki/configuration
+# from veloxq_sdk.config import load_config
+# load_config("config.py")
 
-with open("some_problem_coo.txt") as fd:
-	bqm = coo.load(fd, vartype=dimod.SPIN)
+# Download the example problem file
+request.urlretrieve("https://raw.githubusercontent.com/quantumz-io/veloxq_sdk/main/examples/P2_CBFM-P.txt", "P2_CBFM-P.txt")
 
+# Load BQM from txt problem
+with open("P2_CBFM-P.txt") as fd:
+    bqm = coo.load(fd, vartype=dimod.SPIN)
+
+# Create a file obj to run the solver
 file_obj = File.from_bqm(bqm)
 
+# Select the solver with the PLGrid GH200 backend
 solver = VeloxQSolver(backend=PLGridGH200())
 
+# Run the solver and get the job
 job = solver.submit(file_obj)
 
 job.wait_for_completion()
 
-with open("result.h5", "wb") as f:
-	job.download_result(f)
+# Print results
+print(job.result)
 
+# Save job result
+with open("result.h5", "wb") as f:
+    job.download_result(f)
 ```
 
 Run the script with your token available to the SDK, for example:
