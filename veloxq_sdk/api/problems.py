@@ -527,6 +527,7 @@ class File(BaseModel):
             name=name,
             problem=problem,
             force=force,
+            offset=ising.offset,
         )
 
 
@@ -539,6 +540,7 @@ class File(BaseModel):
         problem: Problem | None = None,
         *,
         force: bool = False,
+        offset: float = 0.0,
     ) -> File:
         """Create a File instance from Ising model.
 
@@ -551,6 +553,7 @@ class File(BaseModel):
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
             force (bool): If True, overwrite if a file with the same name exists.
+            offset (float): Energy offset carried in the Ising model. Defaults to 0.0.
 
         Returns:
             File: The resulting File object.
@@ -564,18 +567,7 @@ class File(BaseModel):
                 return file
 
         with TemporaryFile() as temp_file:
-            if isinstance(biases, Linear) and isinstance(couplings, Quadratic):
-                cls._write_dataset_dimod(temp_file, biases, couplings)
-            elif isinstance(biases, dict) and isinstance(couplings, dict):
-                cls._write_dataset_dict(temp_file, biases, couplings)
-            elif isinstance(biases, (list, np.ndarray)) and isinstance(couplings, (list, np.ndarray)):
-                cls._write_dataset_array(temp_file, biases, couplings)
-            else:
-                msg = (
-                    'Unsupported data types for biases and couplings. '
-                    'Expected lists, NumPy arrays, or dictionaries, or Linear and Quadratic.'
-                )
-                raise TypeError(msg)
+            cls._write_ising_hdf5(temp_file, biases, couplings, offset=offset)
 
             temp_file.flush()
 
@@ -702,95 +694,161 @@ class File(BaseModel):
         return hasher.hexdigest()
 
     @staticmethod
-    def _write_dataset_array(
+    def _write_ising_hdf5(
         file: t.BinaryIO,
-        biases: np.ndarray | list[BiasType],
-        couplings: np.ndarray | list[list[CouplingType]],
+        biases: BiasesType | Linear,
+        couplings: CouplingsType | Quadratic,
+        *,
+        offset: float = 0.0,
     ) -> None:
-        """Write the Ising model data to an HDF5 file.
+        """Serialize Ising data into the solver-compatible HDF5 layout.
 
-        This method handles both NumPy arrays and lists for biases and couplings.
-
-        Args:
-            file (BinaryIO): The file-like object to write the data to.
-            biases (np.ndarray | list[float]): The bias terms in the Ising model.
-            couplings (np.ndarray | list[list[float]]): The coupling terms in the Ising model.
-
+        Group `Ising` with attributes `sparsity`, `type`, `var_type`, and datasets
+        `biases`, `L`, and a sparse CSC-encoded `couplings` subgroup (I, J, V, dims).
+        Labels are stored as strings for round-tripping non-integer variables.
+        Indices are stored 1-based to match the solver reader.
         """
+        normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
         with h5py.File(file, 'w') as hdf:
-            hdf.create_dataset('/Ising/biases', data=biases)
-            hdf.create_dataset('/Ising/couplings', data=couplings)
+            group = hdf.require_group('Ising')
+            group.attrs['sparsity'] = 'sparse'
+            group.attrs['type'] = 'BinaryQuadraticModel'
+            group.attrs['var_type'] = 'SPIN'
+            group.attrs['offset'] = float(normalized['offset'])
+
+            group.create_dataset('biases', data=normalized['biases'])
+            group.create_dataset('L', data=np.array(normalized['size'], dtype=np.int64))
+
+            label_dtype = h5py.string_dtype('utf-8')
+            group.create_dataset(
+                'labels',
+                data=np.array([str(label) for label in normalized['labels']], dtype=label_dtype),
+            )
+
+            couplings_group = group.create_group('couplings')
+            couplings_group.attrs['type'] = 'SparseMatrixCSC'
+            couplings_group.create_dataset(
+                'dims',
+                data=np.array([normalized['size'], normalized['size']], dtype=np.int64),
+            )
+            couplings_group.create_dataset('I', data=normalized['rows'], dtype=np.int64)
+            couplings_group.create_dataset('J', data=normalized['cols'], dtype=np.int64)
+            couplings_group.create_dataset('V', data=normalized['values'], dtype=normalized['dtype'])
 
     @staticmethod
-    def _write_dataset_dict(
-        file: t.BinaryIO,
-        biases: t.Dict[int, float | np.floating],
-        couplings: t.Dict[t.Tuple[int, int], float | np.floating],
-    ) -> None:
-        """Write the Ising model data to an HDF5 file.
-
-        Args:
-            file (BinaryIO): The file-like object to write the data to.
-            biases (Dict[int, float]): A dictionary mapping qubit indices to bias values.
-            couplings (Dict[Tuple[int, int], float]): A dictionary mapping pairs of qubit
-                                                     indices to coupling values.
-
-        """
-        num_qubits = max(biases.keys(), default=0) + 1
-
-        with h5py.File(file, 'w') as hdf:
-            dataset = hdf.create_dataset(
-                '/Ising/biases',
-                shape=(num_qubits,),
-                dtype=type(next(iter(biases.values()))),
-            )
-            for i in range(num_qubits):
-                dataset[i] = biases.get(i, 0.0)
-
-            coupling_matrix = hdf.create_dataset(
-                '/Ising/couplings',
-                shape=(num_qubits, num_qubits),
-                dtype=type(next(iter(couplings.values()))),
-            )
-            for (i, j), value in couplings.items():
-                coupling_matrix[i, j] = value
-                coupling_matrix[j, i] = value
-
-    @staticmethod
-    def _write_dataset_dimod(
-        file: t.BinaryIO,
-        linear: Linear,
-        quadratic: Quadratic,
-    ) -> None:
-        """Write the Ising model data to an HDF5 file using dimod.
-
-        Args:
-            file (BinaryIO): The file-like object to write the data to.
-            linear (Linear): Linear biases.
-            quadratic (Quadratic): Quadratic couplings.
-
-        """
-        variable0 = next(iter(linear))
-        if not isinstance(variable0, (int, np.integer)):
-            msg = 'Variables must be integers.'
+    def _normalize_ising_inputs(
+        biases: BiasesType | Linear,
+        couplings: CouplingsType | Quadratic,
+        *,
+        offset: float = 0.0,
+    ) -> dict[str, t.Any]:
+        """Normalize heterogeneous Ising inputs into arrays for HDF5 serialization."""
+        if isinstance(biases, (Linear, dict)):
+            bias_items = list(biases.items())
+        elif isinstance(biases, (list, np.ndarray)):
+            bias_array = np.asarray(biases)
+            bias_items = list(enumerate(bias_array.tolist()))
+        else:
+            msg = 'Unsupported bias type. Expected Linear, dict, list, or ndarray.'
             raise TypeError(msg)
 
-        num_qubits = len(linear)
+        labels: set[t.Any] = set()
+        bias_values: list[BiasType] = []
+        for label, val in bias_items:
+            labels.add(label)
+            bias_values.append(val)
 
-        with h5py.File(file, 'w') as hdf:
-            dataset = hdf.create_dataset(
-                '/Ising/biases',
-                shape=(num_qubits,),
-                dtype=type(linear[variable0]),
-            )
-            for var, val in linear.items():
-                dataset[var] = val
+        if isinstance(couplings, (Quadratic, dict)):
+            coupling_items = [(u, v, b) for (u, v), b in couplings.items()]
+        elif isinstance(couplings, (list, np.ndarray)):
+            coupling_array = np.asarray(couplings)
+            if (coupling_array.ndim != 2 or
+                coupling_array.shape[0] != coupling_array.shape[1]):
+                msg = 'Couplings array must be square.'
+                raise TypeError(msg)
+            side = coupling_array.shape[0]
+            for idx in range(side):
+                labels.add(idx)
+            nz_rows, nz_cols = np.nonzero(coupling_array)
+            coupling_items = []
+            for i, j in zip(nz_rows.tolist(), nz_cols.tolist()):
+                coupling_items.append((i, j, coupling_array[i, j]))
+        else:
+            msg = 'Unsupported coupling type. Expected Quadratic, dict, list, or ndarray.'
+            raise TypeError(msg)
 
-            coupling_matrix = hdf.create_dataset(
-                '/Ising/couplings',
-                shape=(num_qubits, num_qubits),
-                dtype=type(next(iter(quadratic.values()))),
-            )
-            for (i, j), value in quadratic.items():
-                coupling_matrix[i, j] = value
-                coupling_matrix[j, i] = value
+        coupling_map: dict[frozenset[t.Any], CouplingType] = {}
+        coupling_values: list[CouplingType] = []
+        for u, v, val in coupling_items:
+            labels.add(u)
+            labels.add(v)
+            key = frozenset((u, v))
+            if key in coupling_map:
+                existing = coupling_map[key]
+                if not np.isclose(existing, val):
+                    msg = 'Symmetric couplings contain mismatched values.'
+                    raise ValueError(msg)
+            else:
+                coupling_map[key] = val
+            coupling_values.append(val)
+
+        dtype = np.result_type(
+            *(bias_values or [0.0]),
+            *(coupling_values or [0.0]),
+            np.asarray(offset).dtype,
+        )
+
+        label_to_idx = {label: idx for idx, label in enumerate(labels)}
+        size = len(labels)
+        bias_vector = np.zeros(size, dtype=dtype)
+        for label, val in bias_items:
+            bias_vector[label_to_idx[label]] = val
+
+        rows: list[int] = []
+        cols: list[int] = []
+        values: list[CouplingType] = []
+        for key, val in coupling_map.items():
+            if len(key) == 1:
+                (u,) = tuple(key)
+                i = label_to_idx[u]
+                rows.append(i + 1)
+                cols.append(i + 1)
+                values.append(dtype.type(val))
+                continue
+
+            u, v = sorted(key, key=lambda lbl: label_to_idx[lbl])
+            i = label_to_idx[u]
+            j = label_to_idx[v]
+            # Store 1-based indices for reader compatibility
+            rows.append(i + 1)
+            cols.append(j + 1)
+            values.append(dtype.type(val))
+            if i != j:
+                rows.append(j + 1)
+                cols.append(i + 1)
+                values.append(dtype.type(val))
+
+        if not values:
+            # Ensure downstream reader can build breakpoints
+            # by providing a single zero entry and matching labels/size.
+            rows = [1]
+            cols = [1]
+            values = [dtype.type(0.0)]
+
+        # Sort by column-major order on the first index (I dataset)
+        # assuming monotonic ordering.
+        order = np.lexsort((rows, cols))
+        rows_arr = np.asarray(rows, dtype=np.int64)[order]
+        cols_arr = np.asarray(cols, dtype=np.int64)[order]
+        values_arr = np.asarray(values, dtype=dtype)[order]
+
+        return {
+            'biases': bias_vector,
+            'rows': rows_arr,
+            'cols': cols_arr,
+            'values': values_arr,
+            'labels': labels,
+            'dtype': dtype,
+            'size': size,
+            'offset': offset,
+        }
