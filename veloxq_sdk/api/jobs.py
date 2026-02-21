@@ -12,15 +12,17 @@ import typing as t
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from os import PathLike
 from pathlib import Path
+from shutil import copyfile
 from tempfile import gettempdir
 
 import h5py
+import numpy as np
 from dateutil.parser import isoparse
 from dimod.sampleset import SampleSet
 from dimod.vartypes import SPIN
-import numpy as np
-from pydantic import Field, BeforeValidator
+from pydantic import BeforeValidator, Field
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
 from veloxq_sdk.api.problems import File
@@ -345,6 +347,10 @@ class Job(BaseModel):
         with h5py.File(temp_file, 'r') as file:
             return VeloxSampleSet.from_result(file)
 
+    def save_result(self, path:  str | bytes | PathLike) -> None:
+        """Save the job hdf5 result to a local file."""
+        copyfile(self._get_temp_result(), path)
+
     def download_result(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
         """Download the result.
 
@@ -366,7 +372,6 @@ class Job(BaseModel):
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
-
 
     def refresh(self) -> None:
         """Refresh the job data from the API."""
