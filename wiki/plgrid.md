@@ -49,8 +49,7 @@ job.wait_for_completion()
 print(job.result)
 
 # Save job result
-with open("result.h5", "wb") as f:
-    job.download_result(f)
+job.save_result("result.h5")
 ```
 
 Run the script with your token available to the SDK, for example:

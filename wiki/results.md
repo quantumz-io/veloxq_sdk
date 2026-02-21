@@ -142,14 +142,20 @@ print(df.describe())
 
 ### 2.1 Downloading the Result File
 
-To manually download to a custom location and access the hdf5 data.
+To save the HDF5 result to a custom location and access the data.
+
+```python
+job.save_result("result.hdf5")
+
+with h5py.File("result.hdf5", "r") as data:
+    states = data["Spectrum/states"][:]
+```
+
+Or you can directly download the result to a file-like object:
 
 ```python
 with open("result.hdf5", "wb") as f:
     job.download_result(f, chunk_size=1024*1024)
-
-with h5py.File("result.hdf5", "r") as data:
-    states = data["Spectrum/states"][:]
 ```
 
 ### 2.2 HDF5 Result Structure
