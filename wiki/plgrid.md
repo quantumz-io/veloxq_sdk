@@ -27,7 +27,7 @@ from veloxq_sdk import VeloxQSolver, File, PLGridGH200
 # from veloxq_sdk.config import load_config
 # load_config("config.py")
 
-# Download the example problem file
+# Download the example problem file or use your own
 request.urlretrieve("https://raw.githubusercontent.com/quantumz-io/veloxq_sdk/main/examples/P2_CBFM-P.txt", "P2_CBFM-P.txt")
 
 # Load BQM from txt problem
