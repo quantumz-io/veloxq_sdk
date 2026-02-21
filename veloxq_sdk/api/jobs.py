@@ -395,7 +395,12 @@ class Job(BaseModel):
             list[Job]: A list of Job objects matching the filters.
 
         """
-        params: dict[str, int | str] = {'_page': 1, '_limit': limit}
+        params: dict[str, int | str] = {
+            '_page': 1,
+            '_limit': limit,
+            '_sort': 'created_at',
+            '_order': 'desc',
+        }
         if status:
             params['status'] = status.value
         if created_at:
