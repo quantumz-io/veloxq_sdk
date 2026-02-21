@@ -48,6 +48,8 @@ CouplingsType = t.Union[
 
 InstanceTuple = t.Tuple[BiasesType, CouplingsType]
 
+SPARSE_THRESHOLD = 0.15
+
 
 class InstanceDict(t.TypedDict):
     """A dictionary type for Ising-model instances.
@@ -704,14 +706,14 @@ class File(BaseModel):
         """Serialize Ising data into the solver-compatible HDF5 layout.
 
         Group `Ising` with attributes `sparsity`, `type`, `var_type`, and datasets
-        `biases`, `L`, and a sparse CSC-encoded `couplings` subgroup (I, J, V, dims).
+        `biases`, `L`, and a sparse CSC-encoded `couplings` subgroup (I, J, V, dims)
+        if sparse, or a dense `couplings` dataset if dense.
         Labels are stored as strings for round-tripping non-integer variables.
-        Indices are stored 1-based to match the solver reader.
+        Sparse indices are stored 1-based to match the solver reader.
         """
         normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
         with h5py.File(file, 'w') as hdf:
             group = hdf.require_group('Ising')
-            group.attrs['sparsity'] = 'sparse'
             group.attrs['type'] = 'BinaryQuadraticModel'
             group.attrs['var_type'] = 'SPIN'
             group.attrs['offset'] = float(normalized['offset'])
@@ -725,15 +727,27 @@ class File(BaseModel):
                 data=np.array([str(label) for label in normalized['labels']], dtype=label_dtype),
             )
 
-            couplings_group = group.create_group('couplings')
-            couplings_group.attrs['type'] = 'SparseMatrixCSC'
-            couplings_group.create_dataset(
-                'dims',
-                data=np.array([normalized['size'], normalized['size']], dtype=np.int64),
-            )
-            couplings_group.create_dataset('I', data=normalized['rows'], dtype=np.int64)
-            couplings_group.create_dataset('J', data=normalized['cols'], dtype=np.int64)
-            couplings_group.create_dataset('V', data=normalized['values'], dtype=normalized['dtype'])
+            # Decide sparse vs dense based on coupling density.
+            total_entries = max(1, normalized['size'] * normalized['size'])
+            density = len(normalized['values']) / total_entries
+            if density <= SPARSE_THRESHOLD:
+                group.attrs['sparsity'] = 'sparse'
+                couplings_group = group.create_group('couplings')
+                couplings_group.attrs['type'] = 'SparseMatrixCSC'
+                couplings_group.create_dataset(
+                    'dims',
+                    data=np.array([normalized['size'], normalized['size']], dtype=np.int64),
+                )
+                couplings_group.create_dataset('I', data=normalized['rows'], dtype=np.int64)
+                couplings_group.create_dataset('J', data=normalized['cols'], dtype=np.int64)
+                couplings_group.create_dataset('V', data=normalized['values'], dtype=normalized['dtype'])
+            else:
+                group.attrs['sparsity'] = 'dense'
+                dense = np.zeros((normalized['size'], normalized['size']), dtype=normalized['dtype'])
+                # rows/cols are 1-based; convert to 0-based for assignment
+                if len(normalized['values']):
+                    dense[normalized['rows'] - 1, normalized['cols'] - 1] = normalized['values']
+                group.create_dataset('couplings', data=dense)
 
     @staticmethod
     def _normalize_ising_inputs(
