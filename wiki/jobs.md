@@ -26,13 +26,32 @@ result = job.result  # Get the VeloxSampleSet object
 If you have a `Job` object:
 
 ```python
-job.wait_for_completion(timeout=300)  # 5 minutes
+job.wait_for_completion(timeout=300, refresh=True)  # refresh=True fetches latest metadata after finish
+print(job.status)
 print(job.statistics)
 ```
 
 Raises a `TimeoutError` if it doesn’t complete within the specified time.
 
-### 2.2 Listing Jobs
+- `refresh=True` (default False) after the job finishes updates `status`, `statistics`, `timeline`, and `status_message`.
+- Omit `timeout` to wait indefinitely.
+
+### 2.2 Streaming Job Updates
+
+Use `get_job_updates()` to receive real-time updates (via WebSocket) until the job finishes. The job object is kept in sync with each update.
+
+```python
+for update in job.get_job_updates(timeout=600):
+    print(update.status, update.status_message)
+    print(update.statistics)
+
+print(job.status)       # job fields are updated in-place
+print(job.timeline)
+```
+
+The generator stops automatically when the job completes. A `TimeoutError` is raised if `timeout` is exceeded.
+
+### 2.3 Listing Jobs
 
 Use `Job.get_jobs(...)` to obtain multiple jobs from the server:
 
@@ -46,14 +65,14 @@ jobs = Job.get_jobs(
 )
 ```
 
-#### 2.2.1 Filtering by Status or Creation Time
+#### 2.3.1 Filtering by Status or Creation Time
 
 - `status` can be `CREATED`, `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
 - `created_at` can be `TODAY`, `YESTERDAY`, `LAST_WEEK`, `LAST_MONTH`, `LAST_3_MONTHS`, `LAST_YEAR`, or `ALL`.
 
 Returns up to `limit` jobs; default is 1000.
 
-### 2.3 Retrieving Job by ID
+### 2.4 Retrieving Job by ID
 
 If you know a job’s specific ID:
 
@@ -62,7 +81,7 @@ job = Job.from_id("my_job_id_123")
 print(job.status)
 ```
 
-### 2.4 Getting Job Logs
+### 2.5 Getting Job Logs
 
 Logs can be filtered by category, time period, or message substring:
 
