@@ -12,6 +12,75 @@ PLGrid users with eligible grants can run the VeloxQ Solver on PLGrid infrastruc
 
 - `PLGridGH200` PLGrid 4x NVIDIA GH200 
 
+## Example: Submit, store job ID, and resume later
+
+The following example submits a SPIN BQM to the PLGrid backend, saves the returned job ID, get any job updates and fetch the result.
+
+1) Submit the job and save its ID:
+```python
+from urllib import request
+
+import dimod
+from dimod.serialization import coo
+from veloxq_sdk import VeloxQSolver, File, Job, PLGridGH200
+
+# optional if you prefer file-based configuration; see https://github.com/quantumz-io/veloxq_sdk/wiki/configuration
+# from veloxq_sdk.config import load_config
+# load_config("config.py")
+
+# Download the example problem file or use your own
+request.urlretrieve("https://raw.githubusercontent.com/quantumz-io/veloxq_sdk/main/examples/P2_CBFM-P.txt", "P2_CBFM-P.txt")
+
+# Load BQM from txt problem
+with open("P2_CBFM-P.txt") as fd:
+    bqm = coo.load(fd, vartype=dimod.SPIN)
+
+# Create a file obj to run the solver
+file_obj = File.from_bqm(bqm)
+
+# Select the solver with the PLGrid GH200 backend
+solver = VeloxQSolver(backend=PLGridGH200())
+
+# Run the solver and get the job
+job = solver.submit(file_obj)
+
+# Persist the job id to reuse later
+job_id = job.id
+print("Submitted job id:", job_id)
+with open("job_id.txt", "w") as fd:
+    fd.write(job_id)
+```
+
+2) Restore the job from the saved ID, check status, and fetch results:
+
+```python
+from veloxq_sdk import Job
+
+# NOTE: Make sure your configuration is set up.
+
+# Read the stored id (or keep using the in-memory value)
+with open("job_id.txt") as fd:
+    job_id = fd.read().strip()
+
+# Recreate the job object from its id
+restored_job = Job.from_id(job_id)
+
+# Stream status updates until the job finishes; fields on restored_job update in-place
+for update in restored_job.get_job_updates():
+    print("Job status:", update.status)
+    if update.status_message:
+        print("Message:", update.status_message)
+
+# If you prefer a blocking call without streaming:
+# restored_job.wait_for_completion(refresh=True)  # refresh set to true to update job fields
+
+# Print results
+print(restored_job.result)
+
+# Save job result
+restored_job.save_result("result.h5")
+```
+
 ## Example: Submit a BQM to PLGrid
 
 The example below loads a SPIN BQM from a COO file, submits it to the PLGrid backend, waits for completion, and downloads the result file.
@@ -34,22 +103,14 @@ request.urlretrieve("https://raw.githubusercontent.com/quantumz-io/veloxq_sdk/ma
 with open("P2_CBFM-P.txt") as fd:
     bqm = coo.load(fd, vartype=dimod.SPIN)
 
-# Create a file obj to run the solver
-file_obj = File.from_bqm(bqm)
-
 # Select the solver with the PLGrid GH200 backend
 solver = VeloxQSolver(backend=PLGridGH200())
 
-# Run the solver and get the job
-job = solver.submit(file_obj)
-
-job.wait_for_completion()
+# Run the solver and get the result
+result = solver.sample(bqm)
 
 # Print results
-print(job.result)
-
-# Save job result
-job.save_result("result.h5")
+print(result)
 ```
 
 Run the script with your token available to the SDK, for example:
