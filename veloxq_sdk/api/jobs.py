@@ -129,6 +129,7 @@ class JobResultType(Enum):
     PARALLEL_TEMPERING = 'parallelTempering'
 
 
+@build_adapters
 class JobTimelineValue(BasePydanticModel):
     """Represents a single value on the job timeline.
 
@@ -227,6 +228,15 @@ class JobLogsRow(BasePydanticModel):
         return f'{self.timestamp} [{self.category}] {self.message}'
 
 
+class JobUpdate(BasePydanticModel):
+    statistics: JobStatistics
+    timeline: list[JobTimelineValue]
+    finished: bool = False
+    status: JobStatus
+    status_message: t.Optional[str] = None
+    updated_at: datetime
+
+
 @build_adapters
 class Job(BaseModel):
     """A class representing a job in the VeloxQ API platform.
@@ -252,6 +262,10 @@ class Job(BaseModel):
     status: JobStatus = Field(
         description='The current status of the job.',
     )
+    status_message: t.Optional[str] = Field(
+        default=None,
+        description='Additional information about the job status, if available.',
+    )
 
     statistics: JobStatistics = Field(
         default_factory=JobStatistics,
@@ -271,12 +285,35 @@ class Job(BaseModel):
         description='The input file associated with the job.',
     )
 
-    def wait_for_completion(self, timeout: float | None = None) -> None:
+    def get_job_updates(self, timeout: float | None = None) -> t.Generator[JobUpdate, None, None]:
+        """Get real-time updates for the job."""
+        start_time = time.monotonic()
+        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
+            waiting = True
+            while waiting:
+                if timeout and (time.monotonic() - start_time) > timeout:
+                    msg = (
+                        f'Waiting for Job {self.id} completion timed '
+                        f'out after {timeout} seconds.'
+                    )
+                    raise TimeoutError(msg)
+                update = JobUpdate.model_validate_json(ws.recv(decode=False))
+                waiting = not update.finished
+                self.status = update.status
+                self.status_message = update.status_message
+                self.updated_at = update.updated_at
+                self.statistics = update.statistics
+                self.timeline = update.timeline
+                yield update
+
+    def wait_for_completion(self, timeout: float | None = None, *, refresh: bool = False) -> None:
         """Wait for the job to complete.
 
         Args:
             timeout (float | None): Maximum time in seconds to wait for completion.
                                     If None, wait indefinitely.
+            refresh (bool): If True, automatically refresh the job data after completion
+                            with the latest data from the API. Default is False.
 
         Raises:
             TimeoutError: If the job does not complete by 'timeout' seconds.
@@ -295,11 +332,16 @@ class Job(BaseModel):
                         f'out after {timeout} seconds.'
                     )
                     raise TimeoutError(msg)
-                status_update = json.loads(ws.recv())
+                status_update = json.loads(ws.recv(decode=False))
                 waiting = not status_update['finished']
 
-        self.status = status_update['timeline'][-1]['name']
-        self.updated_at = isoparse(status_update['timeline'][-1]['value'])
+        self.status = status_update['status']
+        if refresh:
+            self.statistics = JobStatistics.model_validate(status_update['statistics'])
+            self.timeline = JobTimelineValue.adapters.list.validate_json(status_update['timeline'])
+            self.status = status_update['status']
+            self.status_message = status_update.get('status_message')
+            self.updated_at = isoparse(status_update['updated_at'])
 
     def get_job_logs(
         self,
