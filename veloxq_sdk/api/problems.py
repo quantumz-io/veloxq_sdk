@@ -591,7 +591,7 @@ class File(BaseModel):
     def from_path(
         cls,
         path: Path | str,
-        name: str | None,
+        name: str | None = None,
         problem: Problem | None = None,
         *,
         force: bool = False,
