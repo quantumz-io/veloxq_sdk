@@ -339,9 +339,8 @@ class Job(BaseModel):
         if refresh:
             self.statistics = JobStatistics.model_validate(status_update['statistics'])
             self.timeline = JobTimelineValue.adapters.list.validate_json(status_update['timeline'])
-            self.status = status_update['status']
-            self.status_message = status_update.get('status_message')
-            self.updated_at = isoparse(status_update['updated_at'])
+            self.status_message = status_update.get('statusMessage')
+            self.updated_at = isoparse(status_update['updatedAt'])
 
     def get_job_logs(
         self,
