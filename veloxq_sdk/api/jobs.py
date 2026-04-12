@@ -248,7 +248,6 @@ class Job(BaseModel):
         status (JobStatus): The current status of the job (e.g., RUNNING, COMPLETED).
         statistics (JobStatistics): Execution statistics (time usage, cost, etc.).
         timeline (List[JobTimelineValue]): A chronological list of status changes.
-        result_metadata (Optional[JobResultData]): Metadata about job results if available.
 
     """
 
@@ -274,11 +273,6 @@ class Job(BaseModel):
     timeline: list[JobTimelineValue] = Field(
         default_factory=list,
         description='Timeline of the job status changes.',
-    )
-    result_metadata: t.Optional[JobResultData] = Field(
-        alias='results',
-        default=None,
-        description='Metadata about the results of the job execution.',
     )
 
     file: t.Annotated[File, BeforeValidator(File.model_validate)] = Field(
@@ -376,6 +370,16 @@ class Job(BaseModel):
         response = self.http.get(f'jobs/{self.id}/logs', params=params)
         response.raise_for_status()
         return JobLogsRow._from_list_response(response)
+
+    def get_result_metadata(self) -> JobResultData:
+        """Get the job result metadata.
+
+        Returns:
+            JobResultData: Metadata about the job's result, including type and items.
+
+        """
+        response = self.http.get(f'jobs/{self.id}/result-metadata')
+        return JobResultData._from_response(response)
 
     @cached_property
     def result(self) -> VeloxSampleSet:
