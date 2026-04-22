@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import typing as t
-from dataclasses import dataclass, field
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, TypeAdapter
@@ -24,6 +23,8 @@ class PaginatedResponse(TypedDict, t.Generic[_T]):
 
 class Adapters(t.Generic[_T]):
     """Container for TypeAdapters for different response types."""
+
+    __slots__ = ('list', 'paginated')
 
     list: TypeAdapter[list[_T]]
     paginated: TypeAdapter[PaginatedResponse[_T]]
