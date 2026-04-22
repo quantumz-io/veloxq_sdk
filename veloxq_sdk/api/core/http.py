@@ -13,9 +13,9 @@ class RestClient(httpx.Client):
 
     API_KEY_HEADER = 'x-veloxq-auth-key'
 
-    def __init__(self, *args: t.Any, **kwargs: t.Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self) -> None:
         config = VeloxQAPIConfig.instance()
+        super().__init__(verify=config.ssl_context)
         config.observe(self._update_token, names='token')
         config.observe(self._update_url, names='url')
         self.headers[self.API_KEY_HEADER] = config.token
@@ -72,20 +72,20 @@ class RestClient(httpx.Client):
             if message:
                 response.extensions['reason_phrase'] = message
 
+class _RestClientGetter:
+    client = None
+
+    def __get__(self, *args, **kwargs) -> RestClient:
+        if _RestClientGetter.client is None:
+            _RestClientGetter.client = RestClient()
+            atexit.register(_RestClientGetter.client.close)
+        return _RestClientGetter.client
+
+
 class ClientMixin:
     """Mixin class to provide HTTP client functionality."""
 
-    _http = RestClient()
+    _http = _RestClientGetter()
 
-    @property
-    def http(self) -> RestClient:
-        """Get the HTTP client instance."""
-        return self._http
+    http = _http
 
-
-@atexit.register
-def __close_http_client() -> None:
-    """Close the HTTP client on exit."""
-    if ClientMixin._http.is_closed: # noqa: SLF001
-        return
-    ClientMixin._http.close() # noqa: SLF001

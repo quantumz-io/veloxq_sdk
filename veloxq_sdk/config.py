@@ -95,6 +95,17 @@ class VeloxQAPIConfig(SingletonConfigurable):
               "Files larger than this will be uploaded using multipart upload."),
     )
 
+    ssl_context = Union(
+        (
+            Instance("ssl.SSLContext"),
+            Unicode(),
+            Bool(),
+        ),
+        default_value=True,
+        config=True,
+        help="SSL context for secure connections. Set to False to disable SSL verification.",
+    )
+
     @validate("url")
     def _validate_url(self, proposal: dict) -> str:
         """Validate that the URL is well-formed."""
