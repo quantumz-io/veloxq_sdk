@@ -29,6 +29,7 @@ Generating Default Config File:
     from veloxq_client_config import generate_py_config_file
     generate_py_config_file("veloxq_api_config.py")
 """
+
 from __future__ import annotations
 
 import json
@@ -36,17 +37,20 @@ import logging
 import os
 import typing as t
 from pathlib import Path
+from urllib.parse import urlparse
 
-from traitlets import Bool, List, Unicode
 from traitlets.config import (
     Config,
+    SingletonConfigurable,
+)
+from traitlets.config.application import TRAITLETS_APPLICATION_RAISE_CONFIG_FILE_ERROR
+from traitlets.config.loader import (
     ConfigFileNotFound,
     DeferredConfigString,
     JSONFileConfigLoader,
     PyFileConfigLoader,
-    SingletonConfigurable,
 )
-from traitlets.config.application import TRAITLETS_APPLICATION_RAISE_CONFIG_FILE_ERROR
+from traitlets.traitlets import Bool, Instance, Int, List, Unicode, Union, validate
 
 if t.TYPE_CHECKING:
     ConfigLike = t.Union[Config, t.Dict[str, t.Any], Path, str]
@@ -57,20 +61,62 @@ _logger = logging.getLogger(__name__)
 class VeloxQAPIConfig(SingletonConfigurable):
     """Configuration class for the VeloxQ API client."""
 
-    name = 'veloxq-api-sdk'
+    name = "veloxq-api-sdk"
 
     url = Unicode(
-        default_value=os.environ.get('VELOXQ_API_URL', 'https://api.veloxq.com'),
+        default_value=os.environ.get("VELOXQ_API_URL", "https://api.veloxq.com"),
         config=True,
-        help='Base URL for the VeloxQ API.',
+        help="Base URL for the VeloxQ API.",
     )
 
     token = Unicode(
-        default_value=os.environ.get('VELOX_TOKEN', ''),
+        default_value=os.environ.get("VELOX_TOKEN", ""),
         allow_none=False,
         config=True,
-        help='API token for authentication with the VeloxQ service.',
+        help="API token for authentication with the VeloxQ service.",
     )
+
+    multipart_upload_thread_count = Int(
+        default_value=os.cpu_count() or 4,
+        config=True,
+        help="Number of threads to use for multipart uploads.",
+    )
+
+    multipart_upload_chunk_size = Int(
+        default_value=32 * 1024 * 1024,  # 32 MB
+        config=True,
+        help="Chunk size in bytes for multipart uploads.",
+    )
+
+    max_single_upload_size = Int(
+        default_value=64 * 1024 * 1024,  # 64 MB
+        config=True,
+        help=("Maximum file size in bytes for single uploads. "
+              "Files larger than this will be uploaded using multipart upload."),
+    )
+
+    @validate("url")
+    def _validate_url(self, proposal: dict) -> str:
+        """Validate that the URL is well-formed."""
+        url = proposal["value"]
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            msg = f"Invalid URL: {url}"
+            raise ValueError(msg)
+        if parsed.params or parsed.query or parsed.fragment:
+            msg_0 = f"URL should not contain params, query, or fragment: {url}"
+            raise ValueError(msg_0)
+        return url
+
+    @validate("multipart_upload_chunk_size")
+    def _validate_multipart_upload_chunk_size(self, proposal: dict) -> int:
+        """Validate the multipart upload chunk size."""
+        chunk_size = proposal["value"]
+        if chunk_size < 16 * 1024 * 1024:  # 16 MB as per API requirements
+            msg = "Chunk size must be at least 16 MB"
+            raise ValueError(msg)
+        return chunk_size
+
 
     raise_config_file_errors = Bool(TRAITLETS_APPLICATION_RAISE_CONFIG_FILE_ERROR)
 
@@ -85,7 +131,7 @@ class VeloxQAPIConfig(SingletonConfigurable):
 
     def load_config_environ(self) -> None:
         """Load config files by environment."""
-        prefix = self.name.upper().replace('-', '_')
+        prefix = self.name.upper().replace("-", "_")
         new_config = Config()
 
         self.log.debug('Looping through config variables with prefix "%s"', prefix)
@@ -96,7 +142,7 @@ class VeloxQAPIConfig(SingletonConfigurable):
                 # use __ instead of . as separator in env variable.
                 # Warning, case sensitive !
                 _, *path, key = k.split("__")
-                section = new_config['VeloxQAPIConfig']
+                section = new_config["VeloxQAPIConfig"]
                 for p in path:
                     section = section[p]
                 setattr(section, key, DeferredConfigString(v))
@@ -136,11 +182,13 @@ class VeloxQAPIConfig(SingletonConfigurable):
             path = [path]
         for current in reversed(path):
             # path list is in descending priority order, so load files backwards:
-            pyloader = cls.python_config_loader_class(basefilename + '.py',
-                                                      path=current)
-            _logger.debug('Looking for %s in %s', basefilename, current or Path.cwd())
-            jsonloader = cls.json_config_loader_class(basefilename + '.json',
-                                                      path=current)
+            pyloader = cls.python_config_loader_class(
+                basefilename + ".py", path=current
+            )
+            _logger.debug("Looking for %s in %s", basefilename, current or Path.cwd())
+            jsonloader = cls.json_config_loader_class(
+                basefilename + ".json", path=current
+            )
             loaded: list[t.Any] = []
             filenames: list[str] = []
             for loader in [pyloader, jsonloader]:
@@ -151,20 +199,23 @@ class VeloxQAPIConfig(SingletonConfigurable):
                         collisions = earlier_config.collisions(config)
                         if collisions:
                             _logger.warning(
-                                'Collisions detected in {0} and {1} config files.'  # noqa: G001, UP032
-                                ' {1} has higher priority: {2}'.format(
-                                filename,
-                                loader.full_filename,
-                                json.dumps(collisions, indent=2)),
+                                "Collisions detected in {0} and {1} config files."  # noqa: G001, UP032
+                                " {1} has higher priority: {2}".format(
+                                    filename,
+                                    loader.full_filename,
+                                    json.dumps(collisions, indent=2),
+                                ),
                             )
                     yield (config, loader.full_filename)
                     loaded.append(config)
                     filenames.append(loader.full_filename)
 
     @staticmethod
-    def __load_config(loader: JSONFileConfigLoader | PyFileConfigLoader,
-                      basefilename: str,
-                      raise_config_file_errors: bool) -> Config | None:
+    def __load_config(
+        loader: JSONFileConfigLoader | PyFileConfigLoader,
+        basefilename: str,
+        raise_config_file_errors: bool,
+    ) -> Config | None:
         try:
             return loader.load_config()
         except ConfigFileNotFound:
@@ -176,10 +227,13 @@ class VeloxQAPIConfig(SingletonConfigurable):
             # problem while running the file
             if raise_config_file_errors:
                 raise
-            _logger.error('Exception while loading config file %s', filename,  # noqa: G201
-                          exc_info=True)
+            _logger.error(
+                "Exception while loading config file %s",
+                filename,  # noqa: G201
+                exc_info=True,
+            )
         else:
-            _logger.debug('Loaded config file: %s', loader.full_filename)
+            _logger.debug("Loaded config file: %s", loader.full_filename)
 
 
 def load_config(config: ConfigLike | None = None) -> None:
@@ -187,9 +241,9 @@ def load_config(config: ConfigLike | None = None) -> None:
     api_config = VeloxQAPIConfig.instance()
     if config is None:
         config = Config()
-        if api_url := os.environ.get('VELOXQ_API_URL'):
+        if api_url := os.environ.get("VELOXQ_API_URL"):
             config.VeloxQAPIConfig.url = api_url
-        if api_key := os.environ.get('VELOX_TOKEN'):
+        if api_key := os.environ.get("VELOX_TOKEN"):
             config.VeloxQAPIConfig.token = api_key
         api_config.update_config(config)
     elif isinstance(config, Config):
@@ -203,10 +257,7 @@ def load_config(config: ConfigLike | None = None) -> None:
         path = Path(config)
         api_config.load_config_file(path.name, path=str(path.parent))
     else:
-        msg = (
-            f'Unsupported config type: {type(config)}. '
-            'Expected a ConfigLike object.'
-        )
+        msg = f"Unsupported config type: {type(config)}. Expected a ConfigLike object."
         raise TypeError(msg)
 
 
@@ -214,22 +265,20 @@ def generate_py_config_file(
     filename: str | Path,
 ) -> None:
     """Generate default config file for the VeloxQ API SDK."""
-    lines = [f'# Configuration file for {VeloxQAPIConfig.name}.']
-    lines.append('')
-    lines.append('c = get_config()  #' + 'noqa')
-    lines.append('')
+    lines = [f"# Configuration file for {VeloxQAPIConfig.name}."]
+    lines.append("")
+    lines.append("c = get_config()  #" + "noqa")
+    lines.append("")
     for _, v in sorted(VeloxQAPIConfig.class_traits(config=True).items()):
-        config_str = f'c.VeloxQAPIConfig.{v.name} = {v.default_value!r}'
+        config_str = f"c.VeloxQAPIConfig.{v.name} = {v.default_value!r}"
         lines.append(config_str)
 
         if help_str := VeloxQAPIConfig.class_get_trait_help(v).splitlines():
-            lines[-1] += f'  # {help_str[0]}'
-            spaces = ' '*len(config_str)
-            lines.extend(
-                f'{spaces}  # {line}' for line in help_str[1:] if line.strip()
-            )
-            lines.append('')
+            lines[-1] += f"  # {help_str[0]}"
+            spaces = " " * len(config_str)
+            lines.extend(f"{spaces}  # {line}" for line in help_str[1:] if line.strip())
+            lines.append("")
 
-    with open(filename, 'w') as f:
-        f.write('\n'.join(lines))
-    _logger.info('Generated config file: %s', filename)
+    with open(filename, "w") as f:
+        f.write("\n".join(lines))
+    _logger.info("Generated config file: %s", filename)

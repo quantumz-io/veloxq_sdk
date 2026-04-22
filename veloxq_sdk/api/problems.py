@@ -4,14 +4,20 @@ This module provides classes and methods for interacting with the VeloxQ API, fo
 Problem and File entities. These classes enable creating, retrieving, uploading, downloading,
 and managing files and problems within the VeloxQ platform.
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 import typing as t
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryFile
+from tempfile import NamedTemporaryFile
+import httpx
+from pydantic.alias_generators import to_camel
+from pydantic import BaseModel as PydanticBaseModel
+from typing_extensions import TypedDict
+from concurrent.futures import ThreadPoolExecutor
 
 import h5py
 import numpy as np
@@ -20,11 +26,12 @@ from dimod.views.quadratic import Linear, Quadratic
 from pydantic import Field, TypeAdapter
 
 from veloxq_sdk.api.core.base import BaseModel, build_adapters
+from veloxq_sdk.config import VeloxQAPIConfig
 
 InstanceLike = t.Union[
-    'InstanceDict',
-    'InstanceTuple',
-    'File',
+    "InstanceDict",
+    "InstanceTuple",
+    "File",
     Path,
     str,
     BinaryQuadraticModel,
@@ -55,7 +62,7 @@ class InstanceDict(t.TypedDict):
     """A dictionary type for Ising-model instances.
 
     Attributes:
-        biases (BiasesType): A list or NumPy array of float values 
+        biases (BiasesType): A list or NumPy array of float values
             representing the bias terms in an Ising model.
         couplings (CouplingType): A nested list or NumPy array of float values
             representing the coupling terms in an Ising model.
@@ -81,11 +88,17 @@ class Problem(BaseModel):
 
     """
 
-    name: str = Field(description='The name of the problem.')
-    created_at: datetime = Field(description='The date and time when the problem was created.')
-    updated_at: datetime = Field(description='The date and time when the problem was last updated.')
+    name: str = Field(description="The name of the problem.")
+    created_at: datetime = Field(
+        description="The date and time when the problem was created."
+    )
+    updated_at: datetime = Field(
+        description="The date and time when the problem was last updated."
+    )
 
-    def get_files(self, name: str | None = None, limit: int = 1000, *, exact: bool = False) -> list[File]:
+    def get_files(
+        self, name: str | None = None, limit: int = 1000, *, exact: bool = False
+    ) -> list[File]:
         """Get all files associated with this problem.
 
         Args:
@@ -99,14 +112,14 @@ class Problem(BaseModel):
 
         """
         params: dict[str, int | str] = {
-            '_limit': limit,
-            '_sort': 'created_at',
-            '_order': 'desc',
+            "_limit": limit,
+            "_sort": "created_at",
+            "_order": "desc",
         }
         if name:
-            params['q'] = name
+            params["q"] = name
 
-        response = self._http.get(f'problems/{self.id}/files', params=params)
+        response = self._http.get(f"problems/{self.id}/files", params=params)
         response.raise_for_status()
         data = File._from_paginated_response(response)
 
@@ -138,13 +151,15 @@ class Problem(BaseModel):
             Problem: The default Problem with the name "undefined".
 
         """
-        response = cls._http.get('problems', params={'_page': 1, '_limit': 1, 'q': 'undefined'})
+        response = cls._http.get(
+            "problems", params={"_page": 1, "_limit": 1, "q": "undefined"}
+        )
         response.raise_for_status()
         data = cls._from_paginated_response(response)
         if data:
             return data[0]
 
-        return cls.create(name='undefined')
+        return cls.create(name="undefined")
 
     @classmethod
     def create(cls, name: str) -> Problem:
@@ -157,11 +172,13 @@ class Problem(BaseModel):
             Problem: The newly created Problem object as stored on the server.
 
         """
-        response = cls._http.post('problems', json={'name': name})
+        response = cls._http.post("problems", json={"name": name})
         return cls._from_response(response)
 
     @classmethod
-    def get_problems(cls, name: str | None = None, limit: int = 1000) -> t.Sequence[Problem]:
+    def get_problems(
+        cls, name: str | None = None, limit: int = 1000
+    ) -> t.Sequence[Problem]:
         """Get all user problems, optionally filtering by name.
 
         Args:
@@ -172,11 +189,11 @@ class Problem(BaseModel):
             list[Problem]: A list of problems matching the query.
 
         """
-        params: dict[str, int | str] = {'_page': 1, '_limit': limit}
+        params: dict[str, int | str] = {"_page": 1, "_limit": limit}
         if name:
-            params['q'] = name
+            params["q"] = name
 
-        response = cls._http.get('problems', params=params)
+        response = cls._http.get("problems", params=params)
         response.raise_for_status()
         return cls._from_paginated_response(response)
 
@@ -191,7 +208,7 @@ class Problem(BaseModel):
             Problem: The matching Problem object, if found.
 
         """
-        response = cls._http.get(f'problems/{problem_id}')
+        response = cls._http.get(f"problems/{problem_id}")
         return cls._from_response(response)
 
 
@@ -215,31 +232,151 @@ class File(BaseModel):
     """
 
     name: str
-    size: int = Field(description='The size of the file in bytes.')
-    uploaded_bytes: int = Field(description='The number of bytes that have been uploaded.')
-    problem_id: str = Field(description='The problem id associated with this file.')
-    created_at: datetime = Field(description='The date and time when the file was created.')
+    size: int = Field(description="The size of the file in bytes.")
+    uploaded_bytes: int = Field(
+        description="The number of bytes that have been uploaded."
+    )
+    problem_id: str = Field(description="The problem id associated with this file.")
+    created_at: datetime = Field(
+        description="The date and time when the file was created."
+    )
     updated_at: t.Optional[datetime] = Field(
         default=None,
-        description='The date and time when the file was updated.',
+        description="The date and time when the file was updated.",
     )
-    status: str = Field(description='The status of the file upload.')
+    status: str = Field(description="The status of the file upload.")
 
-    def upload(self, content: t.IO, chunk_size: int = 1024 * 1024) -> None:
+    class _PreassignedChunkUploader(PydanticBaseModel):
+        """Helper class for multipart chunked uploads."""
+
+        class Config:
+            alias_generator = to_camel
+            validate_by_alias = True
+            validate_by_name = True
+
+        class _PreasignedUploadChunk(TypedDict):
+            """Represents a single chunk in a multipart upload."""
+
+            part_number: int
+            upload_url: str
+            expires_at: datetime
+
+        file: File
+        chunks: list[_PreasignedUploadChunk]
+
+        def upload(
+            self,
+            file_path: Path,
+            callback: t.Callable[[int], None] = lambda _: None,
+        ) -> File:
+            config = VeloxQAPIConfig.instance()
+            uploaded_chunks = []
+
+            def _callback(
+                item: tuple[dict[str, t.Any], int],
+            ) -> dict[str, t.Any]:
+                callback(item[1])
+                return item[0]
+
+            with ThreadPoolExecutor(config.multipart_upload_thread_count) as executor:
+                uploaded_chunks = list(
+                    map(
+                        _callback,
+                        executor.map(
+                            self.upload_part,
+                            [file_path] * len(self.chunks),
+                            self.chunks,
+                        ),
+                    )
+                )
+            response = self.file._http.post(
+                f"/problems/{self.file.problem_id}/files/{self.file.id}/direct/complete",
+                json={
+                    "parts": uploaded_chunks,
+                },
+            )
+            return self.file._update_from_response(response)
+
+        def upload_part(
+            self, file_path: Path, chunk: _PreasignedUploadChunk
+        ) -> tuple[dict[str, t.Any], int]:
+            if datetime.now(timezone.utc) > chunk["expires_at"]:
+                msg = (
+                    f"Upload URL for part {chunk['part_number']} has expired. "
+                    "Please request a new upload URL and retry the upload."
+                )
+                raise ValueError(msg)
+            chunk_size = self.file.size // len(self.chunks)
+            with file_path.open("rb") as f:
+                f.seek((chunk["part_number"] - 1) * chunk_size)
+                data = f.read(chunk_size)
+            response = httpx.put(chunk["upload_url"], content=data, timeout=3600)
+            response.raise_for_status()
+            etag = response.headers.get("ETag")
+            if etag is None:
+                msg = f"ETag header missing in response for part {chunk['part_number']}"
+                raise RuntimeError(msg)
+            return {"part_number": chunk["part_number"], "etag": etag}, len(data)
+
+    class _PreassignedUploader(PydanticBaseModel):
+        """Helper class for multipart chunked uploads."""
+
+        class Config:
+            alias_generator = to_camel
+            validate_by_alias = True
+            validate_by_name = True
+
+        file: File
+        upload_url: str
+        expires_at: datetime
+
+        def upload(
+            self,
+            file_path: Path,
+            callback: t.Callable[[int], None] = lambda _: None,
+        ) -> File:
+            if datetime.now(timezone.utc) > self.expires_at:
+                msg = (
+                    "Upload URL has expired. Please request a new ",
+                    "upload URL and retry the upload.",
+                )
+                raise ValueError(msg)
+            with file_path.open("rb") as f:
+                data = f.read()
+            httpx.put(self.upload_url, content=data, timeout=3600).raise_for_status()
+            callback(len(data))
+            response = self.file._http.post(
+                f"/problems/{self.file.problem_id}/files/{self.file.id}/direct/complete",
+                json={},
+            )
+            return self.file._update_from_response(response)
+
+    _uploader: t.ClassVar[TypeAdapter] = TypeAdapter(
+        t.Union[_PreassignedUploader, _PreassignedChunkUploader],
+    )
+
+    def upload(
+        self,
+        content: t.IO,
+        chunk_size: int = 1024 * 1024,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
+    ) -> None:
         """Upload content to this File via a WebSocket.
 
         Args:
             content (t.IO): A file-like object to read from.
             chunk_size (int): Size of each data chunk in bytes. Defaults to 1 MB.
+            upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
 
         """
         with self.http.open_ws(
-            f'problems/{self.problem_id}/files/{self.id}/upload/ws',
+            f"problems/{self.problem_id}/files/{self.id}/upload/ws",
         ) as ws:
             while data := content.read(chunk_size):
                 ws.send(data)
                 ws.recv()
-            ws.send(b'')
+                upload_callback(len(data))
+            ws.send(b"")
         self.refresh()
 
     def download(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
@@ -250,28 +387,32 @@ class File(BaseModel):
             chunk_size (int): Size of the data chunks to read. Defaults to 1 MB.
 
         """
-        download_url = self.http.get(f'problems/{self.problem_id}/files/{self.id}')
+        download_url = self.http.get(f"problems/{self.problem_id}/files/{self.id}")
         download_url.raise_for_status()
-        with self.http.stream('GET', download_url.text.strip("'").strip('"')) as response:
+        with self.http.stream(
+            "GET", download_url.text.strip("'").strip('"')
+        ) as response:
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
 
     def cancel(self) -> None:
         """Cancel the file upload on the VeloxQ platform."""
-        response = self._http.delete(f'problems/{self.problem_id}/files/{self.id}/cancel')
+        response = self._http.delete(
+            f"problems/{self.problem_id}/files/{self.id}/cancel"
+        )
         response.raise_for_status()
         self.refresh()
 
     def delete(self) -> None:
         """Delete this file from the VeloxQ platform."""
-        response = self._http.delete(f'problems/{self.problem_id}/files/{self.id}')
+        response = self._http.delete(f"problems/{self.problem_id}/files/{self.id}")
         response.raise_for_status()
 
     def refresh(self) -> None:
         """Refresh the file data from the API."""
         response = self._http.get(
-            f'/problems/{self.problem_id}/files/{self.id}/upload-status',
+            f"/problems/{self.problem_id}/files/{self.id}/upload-status",
         )
         self._update_from_response(response)
 
@@ -285,7 +426,7 @@ class File(BaseModel):
         Args:
             name (str): The name of the file to create.
             size (int): The file size in bytes.
-            problem (Problem | None): Optional problem to associate with. 
+            problem (Problem | None): Optional problem to associate with.
                 If None, a default "undefined" problem is used.
 
         Returns:
@@ -294,13 +435,52 @@ class File(BaseModel):
         """
         problem = problem or Problem.undefined()
         response = cls._http.post(
-            f'problems/{problem.id}/files/upload-request',
-            json={'file_name': name, 'size': size},
+            f"problems/{problem.id}/files/upload-request",
+            json={"file_name": name, "size": size},
         )
         return cls._from_response(response)
 
     @classmethod
-    def get_files(cls, name: str | None, limit: int = 1000, *, exact: bool = False) -> t.Sequence[File]:
+    def create_direct(
+        cls,
+        name: str,
+        size: int,
+        problem: Problem | None = None,
+    ) -> _PreassignedUploader | _PreassignedChunkUploader:
+        """Initiate a upload for a new file and retrieve the upload plan.
+
+        This method requests a upload plan for a new file, which includes
+        pre-signed URLs.
+
+        Args:
+            name (str): The name of the file to create.
+            size (int): The total file size in bytes.
+            problem (Problem | None): Optional problem to associate with.
+                If None, a default "undefined" problem is used.
+
+        Returns:
+            _PreassignedUploader | _PreassignedChunkUploader: An object containing the file reference and upload plan.
+
+        """
+        settings = VeloxQAPIConfig.instance()
+        if size <= settings.max_single_upload_size:
+            num_chunks = 0
+        else:
+            num_chunks = size // settings.multipart_upload_chunk_size + bool(
+                size % settings.multipart_upload_chunk_size
+            )
+        problem = problem or Problem.undefined()
+        response = cls._http.post(
+            f"problems/{problem.id}/files/direct",
+            json={"file_name": name, "size": size, "num_chunks": num_chunks},
+        )
+        response.raise_for_status()
+        return cls._uploader.validate_json(response.content)
+
+    @classmethod
+    def get_files(
+        cls, name: str | None, limit: int = 1000, *, exact: bool = False
+    ) -> t.Sequence[File]:
         """Get all user files, optionally filtered by name.
 
         Args:
@@ -311,14 +491,14 @@ class File(BaseModel):
 
         """
         params: dict[str, int | str] = {
-            '_limit': limit,
-            '_sort': 'created_at',
-            '_order': 'desc',
+            "_limit": limit,
+            "_sort": "created_at",
+            "_order": "desc",
         }
         if name:
-            params['q'] = name
+            params["q"] = name
 
-        response = cls._http.get('files', params=params)
+        response = cls._http.get("files", params=params)
         response.raise_for_status()
         data = cls._from_paginated_response(response)
         if exact:
@@ -359,7 +539,7 @@ class File(BaseModel):
             ValueError: If no file with the given ID is found.
 
         """
-        response = cls._http.get(f'files/{file_id}')
+        response = cls._http.get(f"files/{file_id}")
         return cls._from_response(response)
 
     @classmethod
@@ -430,8 +610,8 @@ class File(BaseModel):
             )
 
         msg = (
-            f'Unsupported instance type: {type(instance)}. '
-            'Expected a File, Path, str, dict, or tuple.'
+            f"Unsupported instance type: {type(instance)}. "
+            "Expected a File, Path, str, dict, or tuple."
         )
         raise TypeError(msg)
 
@@ -459,8 +639,8 @@ class File(BaseModel):
 
         """
         return cls.from_ising(
-            biases=data['biases'],
-            couplings=data['couplings'],
+            biases=data["biases"],
+            couplings=data["couplings"],
             name=name,
             problem=problem,
             force=force,
@@ -532,7 +712,6 @@ class File(BaseModel):
             offset=ising.offset,
         )
 
-
     @classmethod
     def from_ising(
         cls,
@@ -543,6 +722,7 @@ class File(BaseModel):
         *,
         force: bool = False,
         offset: float = 0.0,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
     ) -> File:
         """Create a File instance from Ising model.
 
@@ -556,19 +736,20 @@ class File(BaseModel):
             problem (Problem | None): Optional Problem to associate with.
             force (bool): If True, overwrite if a file with the same name exists.
             offset (float): Energy offset carried in the Ising model. Defaults to 0.0.
+            upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
 
         Returns:
             File: The resulting File object.
 
         """
         if name:
-            if (ext_idx := name.find('.')) != -1:
+            if (ext_idx := name.find(".")) != -1:
                 name = name[:ext_idx]
-            name += '.h5'
+            name += ".h5"
             if not force and (file := cls.get_file(name=name, problem=problem)):
                 return file
 
-        with TemporaryFile() as temp_file:
+        with NamedTemporaryFile() as temp_file:
             cls._write_ising_hdf5(temp_file, biases, couplings, offset=offset)
 
             temp_file.flush()
@@ -576,16 +757,16 @@ class File(BaseModel):
             temp_file_size = temp_file.tell()
             temp_file.seek(0)
 
-            name = name or (cls._create_hash(temp_file) + '.h5')
+            name = name or (cls._create_hash(temp_file) + ".h5")
             if not force and (file := cls.get_file(name=name, problem=problem)):
                 return file
 
             temp_file.seek(0)
 
-            new_file = cls.create(name=name, size=temp_file_size, problem=problem)
-            new_file.upload(temp_file)
-
-        return new_file
+            file_uploader = cls.create_direct(
+                name=name, size=temp_file_size, problem=problem
+            )
+            return file_uploader.upload(Path(temp_file.name), callback=upload_callback)
 
     @classmethod
     def from_path(
@@ -595,6 +776,7 @@ class File(BaseModel):
         problem: Problem | None = None,
         *,
         force: bool = False,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
     ) -> File:
         """Create a File instance from a local file path.
 
@@ -608,6 +790,7 @@ class File(BaseModel):
             name (str | None): The file name. By default uses the path's filename.
             problem (Problem | None): Optional Problem to associate with.
             force (bool): If True, overwrite if a file with the same name exists.
+            upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
 
         Returns:
             File: The newly created File object.
@@ -618,27 +801,28 @@ class File(BaseModel):
         """
         path = Path(path)
         if not path.exists():
-            msg = f'File {path} does not exist.'
+            msg = f"File {path} does not exist."
             raise FileNotFoundError(msg)
         name = name or path.name
 
         if not force and (file := cls.get_file(name=name, problem=problem)):
             return file
 
-        new_file = cls.create(name=name, size=path.stat().st_size, problem=problem)
-        with path.open('rb') as file_content:
-            new_file.upload(file_content)
-        return new_file
+        file_uploader = cls.create_direct(
+            name=name, size=path.stat().st_size, problem=problem
+        )
+        return file_uploader.upload(path, callback=upload_callback)
 
     @classmethod
     def from_io(
         cls,
         data: t.BinaryIO,
         name: str | None = None,
-        extension: str = 'h5',
+        extension: str = "h5",
         problem: Problem | None = None,
         *,
         force: bool = False,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
     ) -> File:
         """Create a File instance directly from a binary IO stream.
 
@@ -655,7 +839,7 @@ class File(BaseModel):
                 in the name. Defaults to 'h5'.
             problem (Problem | None): Optional Problem to associate with.
             force (bool): If True, overwrite if a file with the same name exists.
-
+            upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
         Returns:
             File: The File object created from the IO data.
 
@@ -664,8 +848,8 @@ class File(BaseModel):
             data.seek(0)
             name = cls._create_hash(data)
 
-        if name.find('.') == -1:
-            name += f'.{extension}'
+        if name.find(".") == -1:
+            name += f".{extension}"
 
         if not force and (file := cls.get_file(name=name, problem=problem)):
             return file
@@ -677,7 +861,7 @@ class File(BaseModel):
 
     @staticmethod
     def _create_hash(
-        file: t.BinaryIO,
+        file: t.IO,
         chunk_size: int = 1024,
     ) -> str:
         """Create a SHA-256 hash of the file content.
@@ -697,7 +881,7 @@ class File(BaseModel):
 
     @staticmethod
     def _write_ising_hdf5(
-        file: t.BinaryIO,
+        file: t.IO,
         biases: BiasesType | Linear,
         couplings: CouplingsType | Quadratic,
         *,
@@ -712,42 +896,56 @@ class File(BaseModel):
         Sparse indices are stored 1-based to match the solver reader.
         """
         normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
-        with h5py.File(file, 'w') as hdf:
-            group = hdf.require_group('Ising')
-            group.attrs['type'] = 'BinaryQuadraticModel'
-            group.attrs['var_type'] = 'SPIN'
-            group.attrs['offset'] = float(normalized['offset'])
+        with h5py.File(file, "w") as hdf:
+            group = hdf.require_group("Ising")
+            group.attrs["type"] = "BinaryQuadraticModel"
+            group.attrs["var_type"] = "SPIN"
+            group.attrs["offset"] = float(normalized["offset"])
 
-            group.create_dataset('biases', data=normalized['biases'])
-            group.create_dataset('L', data=np.array(normalized['size'], dtype=np.int64))
+            group.create_dataset("biases", data=normalized["biases"])
+            group.create_dataset("L", data=np.array(normalized["size"], dtype=np.int64))
 
-            label_dtype = h5py.string_dtype('utf-8')
+            label_dtype = h5py.string_dtype("utf-8")
             group.create_dataset(
-                'labels',
-                data=np.array([str(label) for label in normalized['labels']], dtype=label_dtype),
+                "labels",
+                data=np.array(
+                    [str(label) for label in normalized["labels"]], dtype=label_dtype
+                ),
             )
 
             # Decide sparse vs dense based on coupling density.
-            total_entries = max(1, normalized['size'] * normalized['size'])
-            density = len(normalized['values']) / total_entries
+            total_entries = max(1, normalized["size"] * normalized["size"])
+            density = len(normalized["values"]) / total_entries
             if density <= SPARSE_THRESHOLD:
-                group.attrs['sparsity'] = 'sparse'
-                couplings_group = group.create_group('couplings')
-                couplings_group.attrs['type'] = 'SparseMatrixCSC'
+                group.attrs["sparsity"] = "sparse"
+                couplings_group = group.create_group("couplings")
+                couplings_group.attrs["type"] = "SparseMatrixCSC"
                 couplings_group.create_dataset(
-                    'dims',
-                    data=np.array([normalized['size'], normalized['size']], dtype=np.int64),
+                    "dims",
+                    data=np.array(
+                        [normalized["size"], normalized["size"]], dtype=np.int64
+                    ),
                 )
-                couplings_group.create_dataset('I', data=normalized['rows'], dtype=np.int64)
-                couplings_group.create_dataset('J', data=normalized['cols'], dtype=np.int64)
-                couplings_group.create_dataset('V', data=normalized['values'], dtype=normalized['dtype'])
+                couplings_group.create_dataset(
+                    "I", data=normalized["rows"], dtype=np.int64
+                )
+                couplings_group.create_dataset(
+                    "J", data=normalized["cols"], dtype=np.int64
+                )
+                couplings_group.create_dataset(
+                    "V", data=normalized["values"], dtype=normalized["dtype"]
+                )
             else:
-                group.attrs['sparsity'] = 'dense'
-                dense = np.zeros((normalized['size'], normalized['size']), dtype=normalized['dtype'])
+                group.attrs["sparsity"] = "dense"
+                dense = np.zeros(
+                    (normalized["size"], normalized["size"]), dtype=normalized["dtype"]
+                )
                 # rows/cols are 1-based; convert to 0-based for assignment
-                if len(normalized['values']):
-                    dense[normalized['rows'] - 1, normalized['cols'] - 1] = normalized['values']
-                group.create_dataset('couplings', data=dense)
+                if len(normalized["values"]):
+                    dense[normalized["rows"] - 1, normalized["cols"] - 1] = normalized[
+                        "values"
+                    ]
+                group.create_dataset("couplings", data=dense)
 
     @staticmethod
     def _normalize_ising_inputs(
@@ -763,7 +961,7 @@ class File(BaseModel):
             bias_array = np.asarray(biases)
             bias_items = list(enumerate(bias_array.tolist()))
         else:
-            msg = 'Unsupported bias type. Expected Linear, dict, list, or ndarray.'
+            msg = "Unsupported bias type. Expected Linear, dict, list, or ndarray."
             raise TypeError(msg)
 
         labels: set[t.Any] = set()
@@ -776,9 +974,11 @@ class File(BaseModel):
             coupling_items = [(u, v, b) for (u, v), b in couplings.items()]
         elif isinstance(couplings, (list, np.ndarray)):
             coupling_array = np.asarray(couplings)
-            if (coupling_array.ndim != 2 or
-                coupling_array.shape[0] != coupling_array.shape[1]):
-                msg = 'Couplings array must be square.'
+            if (
+                coupling_array.ndim != 2
+                or coupling_array.shape[0] != coupling_array.shape[1]
+            ):
+                msg = "Couplings array must be square."
                 raise TypeError(msg)
             side = coupling_array.shape[0]
             for idx in range(side):
@@ -788,7 +988,9 @@ class File(BaseModel):
             for i, j in zip(nz_rows.tolist(), nz_cols.tolist()):
                 coupling_items.append((i, j, coupling_array[i, j]))
         else:
-            msg = 'Unsupported coupling type. Expected Quadratic, dict, list, or ndarray.'
+            msg = (
+                "Unsupported coupling type. Expected Quadratic, dict, list, or ndarray."
+            )
             raise TypeError(msg)
 
         coupling_map: dict[frozenset[t.Any], CouplingType] = {}
@@ -800,7 +1002,7 @@ class File(BaseModel):
             if key in coupling_map:
                 existing = coupling_map[key]
                 if not np.isclose(existing, val):
-                    msg = 'Symmetric couplings contain mismatched values.'
+                    msg = "Symmetric couplings contain mismatched values."
                     raise ValueError(msg)
             else:
                 coupling_map[key] = val
@@ -857,12 +1059,12 @@ class File(BaseModel):
         values_arr = np.asarray(values, dtype=dtype)[order]
 
         return {
-            'biases': bias_vector,
-            'rows': rows_arr,
-            'cols': cols_arr,
-            'values': values_arr,
-            'labels': labels,
-            'dtype': dtype,
-            'size': size,
-            'offset': offset,
+            "biases": bias_vector,
+            "rows": rows_arr,
+            "cols": cols_arr,
+            "values": values_arr,
+            "labels": labels,
+            "dtype": dtype,
+            "size": size,
+            "offset": offset,
         }
