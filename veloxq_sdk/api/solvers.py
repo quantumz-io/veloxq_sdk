@@ -12,6 +12,8 @@ import typing as t
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
+from dimod.sampleset import SampleSet
+
 from veloxq_sdk.api.backends import BaseBackend, VeloxQH100_1
 from veloxq_sdk.api.core.base import BaseModel
 from veloxq_sdk.api.jobs import Job
@@ -50,6 +52,7 @@ class BaseSolver(BaseModel):
         *,
         name: str | None = None,
         problem: Problem | None = None,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
@@ -83,6 +86,7 @@ class BaseSolver(BaseModel):
         *,
         name: str | None = None,
         problem: Problem | None = None,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
@@ -116,6 +120,7 @@ class BaseSolver(BaseModel):
         *args,
         name: str | None = None,
         problem: Problem | None = None,
+        init_state: SampleSet | None = None,
         force: bool = False,
         **kwargs,
     ) -> VeloxSampleSet:
@@ -155,7 +160,7 @@ class BaseSolver(BaseModel):
         else:
             instance = kwargs
 
-        file = File.from_instance(instance, name=name, problem=problem, force=force)  # type: ignore[arg-type]
+        file = File.from_instance(instance, name=name, problem=problem, init_state=init_state, force=force)  # type: ignore[arg-type]
         job = self.submit(file)
         job.wait_for_completion()
         return job.result

@@ -23,10 +23,13 @@ import h5py
 import numpy as np
 from dimod import BinaryQuadraticModel
 from dimod.views.quadratic import Linear, Quadratic
+from dimod.sampleset import SampleSet
 from pydantic import Field, TypeAdapter
 
 from veloxq_sdk.api.core.base import BaseModel, build_adapters
 from veloxq_sdk.config import VeloxQAPIConfig
+
+_logger = logging.getLogger(__name__)
 
 InstanceLike = t.Union[
     "InstanceDict",
@@ -549,6 +552,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
         """Create or retrieve a File instance.
@@ -579,8 +583,16 @@ class File(BaseModel):
 
         """
         if isinstance(instance, File):
+            if init_state is not None:
+                _logger.warning(
+                    'Cannot pass initial state when using a File instance'
+                )
             return instance
         if isinstance(instance, (Path, str)):
+            if init_state is not None:
+                _logger.warning(
+                    'Cannot pass initial state when using instance path'
+                )
             return cls.from_path(
                 path=instance,
                 name=name,
@@ -592,6 +604,7 @@ class File(BaseModel):
                 bqm=instance,
                 name=name,
                 problem=problem,
+                init_state=init_state,
                 force=force,
             )
         if isinstance(instance, dict):
@@ -599,6 +612,7 @@ class File(BaseModel):
                 data=instance,
                 name=name,
                 problem=problem,
+                init_state=init_state,
                 force=force,
             )
         if isinstance(instance, tuple):
@@ -606,6 +620,7 @@ class File(BaseModel):
                 data=instance,
                 name=name,
                 problem=problem,
+                init_state=init_state,
                 force=force,
             )
 
@@ -622,6 +637,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
         """Create a File instance from a dictionary.
@@ -643,6 +659,7 @@ class File(BaseModel):
             couplings=data["couplings"],
             name=name,
             problem=problem,
+            init_state=init_state,
             force=force,
         )
 
@@ -653,6 +670,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
         """Create a File instance from a tuple.
@@ -675,6 +693,7 @@ class File(BaseModel):
             couplings=data[1],
             name=name,
             problem=problem,
+            init_state=init_state,
             force=force,
         )
 
@@ -685,6 +704,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        init_state: SampleSet | None = None,
         force: bool = False,
     ):
         """Create a File instance from a Binary Quadratic Model (BQM).
@@ -708,6 +728,7 @@ class File(BaseModel):
             couplings=ising.quadratic,
             name=name,
             problem=problem,
+            init_state=init_state,
             force=force,
             offset=ising.offset,
         )
@@ -720,6 +741,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        init_state: SampleSet | None = None,
         force: bool = False,
         offset: float = 0.0,
         upload_callback: t.Callable[[int], None] = lambda _: None,
@@ -750,7 +772,7 @@ class File(BaseModel):
                 return file
 
         with NamedTemporaryFile() as temp_file:
-            cls._write_ising_hdf5(temp_file, biases, couplings, offset=offset)
+            cls._write_ising_hdf5(temp_file, biases, couplings, init_state=init_state, offset=offset)
 
             temp_file.flush()
 
@@ -885,6 +907,7 @@ class File(BaseModel):
         biases: BiasesType | Linear,
         couplings: CouplingsType | Quadratic,
         *,
+        init_state: SampleSet | None = None,
         offset: float = 0.0,
     ) -> None:
         """Serialize Ising data into the solver-compatible HDF5 layout.
@@ -946,6 +969,21 @@ class File(BaseModel):
                         "values"
                     ]
                 group.create_dataset("couplings", data=dense)
+
+            # Include the initial state as spectrum
+            if init_state is not None:
+                states = init_state.record.sample
+                energies = init_state.record.energy
+                num_rep = energies.shape[0]
+                size = normalized["size"]
+                if energies.shape != (num_rep,) or states.shape != (num_rep, size):
+                    msg = "Initial SampleSet needs to have consistent size and fit the instance."
+                    raise TypeError(msg)
+                spectrum = hdf.require_group("Spectrum")
+                spectrum.create_dataset("L", data=np.array(size, dtype=np.int64))
+                spectrum.create_dataset("num_rep", data=np.array(num_rep, dtype=np.int64))
+                spectrum.create_dataset("energies", data=energies.astype(normalized["dtype"]))
+                spectrum.create_dataset("states", data=states.astype(normalized["dtype"]))
 
     @staticmethod
     def _normalize_ising_inputs(
