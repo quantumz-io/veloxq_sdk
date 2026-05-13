@@ -952,8 +952,8 @@ class File(BaseModel):
 
             # Decide sparse vs dense based on coupling density.
             total_entries = max(1, normalized["size"] * normalized["size"])
-            density = len(normalized["values"]) / total_entries
-            if density <= SPARSE_THRESHOLD:
+            density = (total_entries - len(normalized["values"])) / total_entries
+            if density >= SPARSE_THRESHOLD:
                 group.attrs["sparsity"] = "sparse"
                 couplings_group = group.create_group("couplings")
                 couplings_group.attrs["type"] = "SparseMatrixCSC"
