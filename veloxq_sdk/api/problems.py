@@ -40,23 +40,37 @@ InstanceLike = t.Union[
     BinaryQuadraticModel,
 ]
 
-BiasType = t.Union[float, np.floating]
+BiasType = t.Union[float, np.number]
 CouplingType = BiasType
+
+VariableType = t.Hashable
 
 BiasesType = t.Union[
     t.List[BiasType],
-    np.ndarray,
-    t.Dict[int, BiasType],
+    np.ndarray[tuple[int], np.dtype[np.number]],
+    t.Dict[VariableType, BiasType],
     Linear,
 ]
 CouplingsType = t.Union[
     t.List[t.List[CouplingType]],
-    np.ndarray,
-    t.Dict[t.Tuple[int, int], CouplingType],
+    np.ndarray[tuple[int, int], np.dtype[np.number]],
+    t.Dict[t.Tuple[VariableType, ...], CouplingType],
     Quadratic,
 ]
 
 InstanceTuple = t.Tuple[BiasesType, CouplingsType]
+
+if t.TYPE_CHECKING:
+    class _NormalizedIsingModel(t.TypedDict):
+        biases: np.ndarray[tuple[int], np.dtype[np.number]]
+        rows: np.ndarray[tuple[int], np.dtype[np.integer]]
+        cols: np.ndarray[tuple[int], np.dtype[np.integer]]
+        values: np.ndarray[tuple[int], np.dtype[np.number]]
+        labels: np.ndarray[tuple[int], np.dtype[np.str_]]
+        idx_dtype: np.dtype[np.integer]
+        size: int
+        offset: float
+
 
 SPARSE_THRESHOLD = 0.15
 
@@ -987,29 +1001,27 @@ class File(BaseModel):
 
     @staticmethod
     def _normalize_ising_inputs(
-        biases: BiasesType | Linear,
-        couplings: CouplingsType | Quadratic,
+        biases: BiasesType,
+        couplings: CouplingsType,
         *,
         offset: float = 0.0,
-    ) -> dict[str, t.Any]:
+    ) -> _NormalizedIsingModel:
         """Normalize heterogeneous Ising inputs into arrays for HDF5 serialization."""
         if isinstance(biases, (Linear, dict)):
-            bias_items = list(biases.items())
+            biases_dict = dict(biases)
         elif isinstance(biases, (list, np.ndarray)):
             bias_array = np.asarray(biases)
-            bias_items = list(enumerate(bias_array.tolist()))
+            if bias_array.ndim != 1:
+                msg = "Biases array must be one-dimensional or a dict of labels and biases."
+                raise TypeError(msg)
+            biases_dict: dict[VariableType, BiasType] = {i: bias_array[i] for i in range(len(bias_array))}
         else:
             msg = "Unsupported bias type. Expected Linear, dict, list, or ndarray."
             raise TypeError(msg)
 
-        labels: set[t.Any] = set()
-        bias_values: list[BiasType] = []
-        for label, val in bias_items:
-            labels.add(label)
-            bias_values.append(val)
-
+        # Process couplings - optimize array case with vectorization
         if isinstance(couplings, (Quadratic, dict)):
-            coupling_items = [(u, v, b) for (u, v), b in couplings.items()]
+            coupling_items = list(couplings.items())
         elif isinstance(couplings, (list, np.ndarray)):
             coupling_array = np.asarray(couplings)
             if (
@@ -1018,91 +1030,122 @@ class File(BaseModel):
             ):
                 msg = "Couplings array must be square."
                 raise TypeError(msg)
-            side = coupling_array.shape[0]
-            for idx in range(side):
-                labels.add(idx)
+            # Vectorized extraction of nonzero elements
             nz_rows, nz_cols = np.nonzero(coupling_array)
-            coupling_items = []
-            for i, j in zip(nz_rows.tolist(), nz_cols.tolist()):
-                coupling_items.append((i, j, coupling_array[i, j]))
+            coupling_items = [((i, j), coupling_array[i, j]) for i, j in zip(nz_rows, nz_cols)]
         else:
             msg = (
                 "Unsupported coupling type. Expected Quadratic, dict, list, or ndarray."
             )
             raise TypeError(msg)
 
-        coupling_map: dict[frozenset[t.Any], CouplingType] = {}
-        coupling_values: list[CouplingType] = []
-        for u, v, val in coupling_items:
-            labels.add(u)
-            labels.add(v)
-            key = frozenset((u, v))
-            if key in coupling_map:
-                existing = coupling_map[key]
+        couplings_dict: dict[tuple[VariableType, ...], CouplingType] = {}
+        for key, val in coupling_items:
+            # Ensure biases exist for all variables in couplings
+            if len(key) == 1:
+                canonical_key = key
+                if key[0] not in biases_dict:
+                    biases_dict[key[0]] = 0.0
+            elif len(key) == 2:
+                # Canonical ordering: min index first
+                canonical_key = (min(key), max(key)) if key[0] != key[1] else (key[0],)
+                for i in key:
+                    if i not in biases_dict:
+                        biases_dict[i] = 0.0
+            else:
+                msg = f"Coupling key must have 1 or 2 elements, got {len(key)}"
+                raise ValueError(msg)
+
+            # Check for conflicts only when key already exists
+            if canonical_key in couplings_dict:
+                existing = couplings_dict[canonical_key]
                 if not np.isclose(existing, val):
-                    msg = "Symmetric couplings contain mismatched values."
+                    u, v = canonical_key if len(canonical_key) == 2 else (canonical_key[0], canonical_key[0])
+                    msg = f"Symmetric couplings contain mismatched values for pair ({u}, {v}): {existing} vs {val}"
                     raise ValueError(msg)
             else:
-                coupling_map[key] = val
-            coupling_values.append(val)
+                couplings_dict[canonical_key] = val
 
-        dtype = np.result_type(
-            *(bias_values or [0.0]),
-            *(coupling_values or [0.0]),
-            np.asarray(offset).dtype,
-        )
+        if not biases_dict:
+            msg = "Empty instance"
+            raise ValueError(msg)
 
-        label_to_idx = {label: idx for idx, label in enumerate(labels)}
-        size = len(labels)
-        bias_vector = np.zeros(size, dtype=dtype)
-        for label, val in bias_items:
-            bias_vector[label_to_idx[label]] = val
+        # Create label mapping
+        label_to_idx = {label: idx for idx, label in enumerate(biases_dict.keys())}
+        size = len(label_to_idx)
+        idx_dtype: np.dtype[np.integer] = np.min_scalar_type(size)
 
-        rows: list[int] = []
-        cols: list[int] = []
-        values: list[CouplingType] = []
-        for key, val in coupling_map.items():
+        # Estimate size: diagonal + off-diagonal elements (symmetrized)
+        num_couplings = len(couplings_dict)
+        # Count off-diagonal elements for proper pre-allocation
+        num_off_diag = sum(1 for key in couplings_dict.keys() if len(key) == 2)
+        total_entries = num_couplings + num_off_diag  # diagonal + 2x off-diagonal
+
+        rows_list = np.empty(total_entries, dtype=idx_dtype)
+        cols_list = np.empty(total_entries, dtype=idx_dtype)
+        values_list = np.empty(total_entries, dtype=float)
+
+        idx = 0
+        max_value = -np.inf
+        for key, val in couplings_dict.items():
             if len(key) == 1:
-                (u,) = tuple(key)
+                u = key[0]
                 i = label_to_idx[u]
-                rows.append(i + 1)
-                cols.append(i + 1)
-                values.append(dtype.type(val))
-                continue
+                rows_list[idx] = i + 1
+                cols_list[idx] = i + 1
+                values_list[idx] = val
+                idx += 1
+            else:  # len(key) == 2
+                u, v = key
+                i = label_to_idx[u]
+                j = label_to_idx[v]
+                # Upper triangle entry
+                rows_list[idx] = i + 1
+                cols_list[idx] = j + 1
+                values_list[idx] = val
+                idx += 1
+                # Lower triangle entry (symmetric)
+                rows_list[idx] = j + 1
+                cols_list[idx] = i + 1
+                values_list[idx] = val
+                idx += 1
 
-            u, v = sorted(key, key=lambda lbl: label_to_idx[lbl])
-            i = label_to_idx[u]
-            j = label_to_idx[v]
-            # Store 1-based indices for reader compatibility
-            rows.append(i + 1)
-            cols.append(j + 1)
-            values.append(dtype.type(val))
-            if i != j:
-                rows.append(j + 1)
-                cols.append(i + 1)
-                values.append(dtype.type(val))
+            max_value = max(max_value, abs(val))
 
-        if not values:
-            # Ensure downstream reader can build breakpoints
-            # by providing a single zero entry and matching labels/size.
-            rows = [1]
-            cols = [1]
-            values = [dtype.type(0.0)]
+        # Trim to actual size
+        rows_list = rows_list[:idx]
+        cols_list = cols_list[:idx]
+        values_list = values_list[:idx]
 
-        # Sort by column-major order on the first index (I dataset)
-        # assuming monotonic ordering.
-        order = np.lexsort((rows, cols))
-        rows_arr = np.asarray(rows, dtype=np.int64)[order]
-        cols_arr = np.asarray(cols, dtype=np.int64)[order]
-        values_arr = np.asarray(values, dtype=dtype)[order]
+        # Sort by column-major order
+        order = np.lexsort((rows_list, cols_list))
+        rows_arr = rows_list[order]
+        cols_arr = cols_list[order]
+
+        # Select float32 or float64 for Solver compatibility
+        # Use float32 if values fit, otherwise float64 for precision
+        value_dtype = np.min_scalar_type(max_value if max_value != -np.inf else 0.0)
+        if value_dtype.kind == "f" and value_dtype.itemsize < 4:
+            value_dtype = np.float32
+        values_arr = values_list[order].astype(value_dtype)
+
+        # Convert biases to array efficiently
+        bias_vals = np.array(list(biases_dict.values()), dtype=float)
+        bias_dtype = np.min_scalar_type(np.abs(bias_vals).max())
+        if bias_dtype.kind == "f" and bias_dtype.itemsize < 4:
+            bias_dtype = np.float32
+        bias_arr = bias_vals.astype(bias_dtype)
+
+        # Convert labels to array of strings for HDF5 compatibility
+        labels = np.fromiter(map(str, biases_dict.keys()), dtype=np.dtype("T"))
 
         return {
-            "biases": bias_vector,
+            "biases": bias_arr,
             "rows": rows_arr,
             "cols": cols_arr,
             "values": values_arr,
             "labels": labels,
-            "dtype": dtype,
+            "idx_dtype": idx_dtype,
             "size": size,
             "offset": offset,
         }
