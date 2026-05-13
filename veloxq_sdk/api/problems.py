@@ -918,8 +918,8 @@ class File(BaseModel):
     @staticmethod
     def _write_ising_hdf5(
         file: t.IO,
-        biases: BiasesType | Linear,
-        couplings: CouplingsType | Quadratic,
+        biases: BiasesType,
+        couplings: CouplingsType,
         *,
         init_state: SampleSet | None = None,
         offset: float = 0.0,
@@ -933,25 +933,44 @@ class File(BaseModel):
         Sparse indices are stored 1-based to match the solver reader.
         """
         normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
-        with h5py.File(file, "w") as hdf:
+
+        size = normalized["size"]
+        idx_dtype = normalized["idx_dtype"]
+
+        # Use libver='latest' for better performance with large files
+        with h5py.File(file, "w", libver='latest') as hdf:
             group = hdf.require_group("Ising")
             group.attrs["type"] = "BinaryQuadraticModel"
             group.attrs["var_type"] = "SPIN"
             group.attrs["offset"] = float(normalized["offset"])
 
-            group.create_dataset("biases", data=normalized["biases"])
-            group.create_dataset("L", data=np.array(normalized["size"], dtype=np.int64))
+            # Use chunking for better I/O performance on large datasets
+            bias_data = normalized["biases"]
+            bias_chunks = None
+            if bias_data.ndim == 1 and bias_data.shape[0] > 1000:
+                bias_chunks = (min(bias_data.shape[0], 10000),)
 
-            label_dtype = h5py.string_dtype("utf-8")
+            group.create_dataset(
+                "biases",
+                data=bias_data,
+                chunks=bias_chunks,
+            )
+
+            group.create_dataset("L", data=size, dtype=idx_dtype)
+
+            labels_data = normalized["labels"]
+            labels_chunks = None
+            if labels_data.ndim == 1 and labels_data.shape[0] > 1000:
+                labels_chunks = (min(labels_data.shape[0], 10000),)
+
             group.create_dataset(
                 "labels",
-                data=np.array(
-                    [str(label) for label in normalized["labels"]], dtype=label_dtype
-                ),
+                data=labels_data,
+                chunks=labels_chunks,
             )
 
             # Decide sparse vs dense based on coupling density.
-            total_entries = max(1, normalized["size"] * normalized["size"])
+            total_entries = max(1, size * size)
             density = (total_entries - len(normalized["values"])) / total_entries
             if density >= SPARSE_THRESHOLD:
                 group.attrs["sparsity"] = "sparse"
@@ -959,45 +978,103 @@ class File(BaseModel):
                 couplings_group.attrs["type"] = "SparseMatrixCSC"
                 couplings_group.create_dataset(
                     "dims",
-                    data=np.array(
-                        [normalized["size"], normalized["size"]], dtype=np.int64
-                    ),
+                    data=np.array([size, size], dtype=idx_dtype),
+                    dtype=idx_dtype,
+                )
+                # Chunk sparse arrays for better performance
+                rows_data = normalized["rows"]
+                cols_data = normalized["cols"]
+                values_data = normalized["values"]
+
+                # Determine chunking for sparse arrays based on actual shapes
+                rows_chunks = None
+                if rows_data.ndim == 1 and rows_data.shape[0] > 1000:
+                    rows_chunks = (min(rows_data.shape[0], 10000),)
+
+                cols_chunks = None
+                if cols_data.ndim == 1 and cols_data.shape[0] > 1000:
+                    cols_chunks = (min(cols_data.shape[0], 10000),)
+
+                values_chunks = None
+                if values_data.ndim == 1 and values_data.shape[0] > 1000:
+                    values_chunks = (min(values_data.shape[0], 10000),)
+
+                couplings_group.create_dataset(
+                    "I",
+                    data=rows_data,
+                    chunks=rows_chunks,
                 )
                 couplings_group.create_dataset(
-                    "I", data=normalized["rows"], dtype=np.int64
+                    "J",
+                    data=cols_data,
+                    chunks=cols_chunks,
                 )
                 couplings_group.create_dataset(
-                    "J", data=normalized["cols"], dtype=np.int64
-                )
-                couplings_group.create_dataset(
-                    "V", data=normalized["values"], dtype=normalized["dtype"]
+                    "V",
+                    data=values_data,
+                    chunks=values_chunks,
                 )
             else:
                 group.attrs["sparsity"] = "dense"
-                dense = np.zeros(
-                    (normalized["size"], normalized["size"]), dtype=normalized["dtype"]
-                )
+                dense = np.zeros((size, size), dtype=normalized["values"].dtype)
                 # rows/cols are 1-based; convert to 0-based for assignment
                 if len(normalized["values"]):
                     dense[normalized["rows"] - 1, normalized["cols"] - 1] = normalized[
                         "values"
                     ]
-                group.create_dataset("couplings", data=dense)
+                # Use chunking for large dense matrices
+                dense_chunks = None
+                if dense.ndim == 2:
+                    nrows, ncols = dense.shape
+                    if nrows > 1000 or ncols > 1000:
+                        dense_chunks = (min(nrows, 1000), min(ncols, 1000))
+
+                group.create_dataset(
+                    "couplings",
+                    data=dense,
+                    dtype=dense.dtype,
+                    chunks=dense_chunks,
+                )
 
             # Include the initial state as spectrum
             if init_state is not None:
                 states = init_state.record.sample
                 energies = init_state.record.energy
                 num_rep = energies.shape[0]
-                size = normalized["size"]
                 if energies.shape != (num_rep,) or states.shape != (num_rep, size):
                     msg = "Initial SampleSet needs to have consistent size and fit the instance."
                     raise TypeError(msg)
                 spectrum = hdf.require_group("Spectrum")
-                spectrum.create_dataset("L", data=np.array(size, dtype=np.int64))
-                spectrum.create_dataset("num_rep", data=np.array(num_rep, dtype=np.int64))
-                spectrum.create_dataset("energies", data=energies.astype(normalized["dtype"]))
-                spectrum.create_dataset("states", data=states.astype(normalized["dtype"]))
+                spectrum.create_dataset("L", data=size, dtype=idx_dtype)
+                spectrum.create_dataset("num_rep", data=np.array(num_rep), dtype=np.int64)
+
+                # Energy chunking based on actual shape - select float32 or float64
+                max_abs_energy = np.abs(energies).max() if len(energies) > 0 else 0.0
+                energy_dtype = np.float32 if max_abs_energy < 1e7 else np.float64
+                energy_chunks = None
+                if energies.ndim == 1 and energies.shape[0] > 1000:
+                    energy_chunks = (min(energies.shape[0], 1000),)
+
+                spectrum.create_dataset(
+                    "energies",
+                    data=energies,
+                    dtype=energy_dtype,
+                    chunks=energy_chunks,
+                )
+
+                # States chunking based on actual 2D shape
+                states_chunks = None
+                if states.ndim == 2:
+                    nrows, ncols = states.shape
+                    if nrows > 1000 or ncols > 1000:
+                        states_chunks = (min(nrows, 1000), min(ncols, 1000))
+
+                spectrum.create_dataset(
+                    "states",
+                    data=states,
+                    dtype=np.int8,  # States are typically -1/+1 or 0/1
+                    chunks=states_chunks,
+                )
 
     @staticmethod
     def _normalize_ising_inputs(
