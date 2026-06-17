@@ -1,6 +1,6 @@
 """VeloxQ SDK for Python."""
 
-__version__ = '1.0.0dev17'
+__version__ = '1.0.0dev18'
 
 from veloxq_sdk.backends import (
     VeloxQH100_1,
