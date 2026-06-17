@@ -242,7 +242,6 @@ class Job(BaseModel):
     """A class representing a job in the VeloxQ API platform.
 
     Attributes:
-        number (int): The job's short ID displayed (alias for 'shortId').
         created_at (datetime): The date/time when the job was created.
         updated_at (datetime): The date/time when the job was last updated.
         status (JobStatus): The current status of the job (e.g., RUNNING, COMPLETED).
@@ -251,7 +250,6 @@ class Job(BaseModel):
 
     """
 
-    number: int = Field(alias='shortId', description='The job number.')
     created_at: datetime = Field(
         description='The date and time when the job was created.',
     )
