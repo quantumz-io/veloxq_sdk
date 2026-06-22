@@ -771,24 +771,26 @@ class File(BaseModel):
             if not force and (file := cls.get_file(name=name, problem=problem)):
                 return file
 
-        with NamedTemporaryFile() as temp_file:
-            cls._write_ising_hdf5(temp_file, biases, couplings, init_state=init_state, offset=offset)
+        temp_file_path = None
+        try:
+            with NamedTemporaryFile(delete=False) as temp_file:
+                temp_file_path = Path(temp_file.name)
 
-            temp_file.flush()
+                cls._write_ising_hdf5(temp_file, biases, couplings, init_state=init_state, offset=offset)
+                temp_file.flush()
+                temp_file_size = temp_file.tell()
+                temp_file.seek(0)
+                name = name or (cls._create_hash(temp_file) + ".h5")
 
-            temp_file_size = temp_file.tell()
-            temp_file.seek(0)
-
-            name = name or (cls._create_hash(temp_file) + ".h5")
             if not force and (file := cls.get_file(name=name, problem=problem)):
                 return file
-
-            temp_file.seek(0)
-
             file_uploader = cls.create_direct(
                 name=name, size=temp_file_size, problem=problem
             )
-            return file_uploader.upload(Path(temp_file.name), callback=upload_callback)
+            return file_uploader.upload(temp_file_path, callback=upload_callback)
+        finally:
+            if temp_file_path is not None:
+                temp_file_path.unlink(missing_ok=True)
 
     @classmethod
     def from_path(
