@@ -34,7 +34,7 @@ from tbos import Buffer
 
 try:
     from scipy.sparse import coo_matrix as _coo_matrix
-    coo_matrix = lambda *args: _coo_matrix(args)  # noqa: E731
+    coo_matrix = lambda shape, rows, cols, values: _coo_matrix((values, (rows, cols)), shape=shape)  # noqa: E731
     _SCIPY_AVAILABLE = True
 except ImportError:
     from tbos import TbosCOOMatrix
