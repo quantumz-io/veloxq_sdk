@@ -25,7 +25,21 @@ from dimod.vartypes import SPIN
 from pydantic import BeforeValidator, Field
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
-from veloxq_sdk.api.problems import File
+from veloxq_sdk.api.problems import File, SPARSE_THRESHOLD
+
+if t.TYPE_CHECKING:
+    from websockets.sync.client import ClientConnection
+
+from tbos import Buffer
+
+try:
+    from scipy.sparse import coo_matrix as _coo_matrix
+    coo_matrix = lambda *args: _coo_matrix(args)  # noqa: E731
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    from tbos import TbosCOOMatrix
+    coo_matrix = TbosCOOMatrix
+    _SCIPY_AVAILABLE = False
 
 
 class LogCategory(Enum):
@@ -466,6 +480,68 @@ class Job(BaseModel):
         response = cls._http.get(f'jobs/{job_id}')
         return cls._from_response(response)
 
+    @classmethod
+    def launch_ws(  # noqa: PLR0913
+        cls,
+        solver_id: str,
+        backend_id: str,
+        biases: t.Any,
+        couplings: t.Any,
+        parameters: dict[str, t.Any] | None = None,
+        *,
+        init_state: SampleSet | None = None,
+        offset: float = 0.0,
+    ) -> 'VeloxSampleSet':
+        """Submit a job via WebSocket streaming I/O and return results directly.
+
+        Encodes the Ising model with tbos, streams it to the server through
+        ``/jobs/ws/launch``, and decodes the returned spectrum into a
+        :class:`VeloxSampleSet` — all in a single synchronous call with no
+        file upload.
+
+        Args:
+            solver_id: ID of the solver to use.
+            backend_id: ID of the backend to run on.
+            biases: Bias terms of the Ising model.
+            couplings: Coupling terms of the Ising model.
+            parameters: Solver parameters dict (forwarded as-is).
+            init_state: Optional initial SampleSet included as a Spectrum group.
+            chunk_size: Maximum bytes per WebSocket frame. Defaults to 1 MB.
+            offset: Energy offset of the model. Defaults to 0.0.
+
+        Returns:
+            VeloxSampleSet containing the sampled states and energies.
+
+        """
+        normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
+        model_buf = _build_ising_tbos(normalized, init_state)
+
+        with cls._http.open_ws('jobs/ws/launch') as ws:
+            _tbos_ws_send(ws, {
+                'type': 'launch_request',
+                'solver_id': solver_id,
+                'backend_id': backend_id,
+                'parameters': parameters or {},
+            })
+
+            msg = _tbos_ws_recv(ws)
+            if msg.get('type') == 'error':
+                msg_0 = f"Server error: {msg.get('message', 'unknown')}"
+                raise RuntimeError(msg_0)
+            if msg.get('type') != 'waiting_for_input':
+                msg_1 = f"Unexpected server message: {msg.get('type')!r}"
+                raise RuntimeError(msg_1)
+
+            view = model_buf.buffer_bytes()
+            chunk_size = (1024 * 1024) - 64
+            for i in range(0, len(view), chunk_size):
+                _tbos_ws_send(ws, {'type': 'input_chunk', 'data': view[i:i + chunk_size]})
+            _tbos_ws_send(ws, {'type': 'input_done'})
+
+            result = _collect_ws_result(ws)
+
+        return VeloxSampleSet.from_result_dict(result)
+
     def _get_temp_result(self) -> Path:
         """Get the temporary cached result file.
 
@@ -548,3 +624,108 @@ class VeloxSampleSet(SampleSet):
             sampleset.relabel_variables(dict(enumerate(labels.asstr(encoding='utf-8'))))
 
         return sampleset
+
+    @classmethod
+    def from_result_dict(cls, data: dict[str, t.Any]) -> VeloxSampleSet:
+        """Create a VeloxSampleSet from a dictionary."""
+        data = data['Spectrum']
+        samples = data['states'].T
+        energies = data['energies']
+
+        info = data.get('metadata', {})
+        labels = info.pop('labels', [])
+
+        for key in data.keys() - {'states', 'energies', 'metadata', 'labels'}:
+            info[key] = data[key]
+
+        sampleset = cls.from_samples(
+            samples,
+            energy=energies,
+            vartype=SPIN,
+            info=info,
+            aggregate_samples=True,
+        )
+
+        if labels is not None:
+            sampleset.relabel_variables(dict(enumerate(labels.asstr(encoding='utf-8'))))
+
+        return sampleset
+
+
+# ---------------------------------------------------------------------------
+# Module-level tbos WebSocket helpers (used by Job.launch_ws)
+# ---------------------------------------------------------------------------
+
+def _tbos_ws_send(ws: ClientConnection, payload: dict[str, t.Any]) -> None:
+    buf = Buffer()
+    buf.write(payload)
+    ws.send(buf.buffer_bytes(), text=False)
+
+
+def _tbos_ws_recv(ws: ClientConnection) -> dict[str, t.Any]:
+    raw = ws.recv(decode=False)
+    return Buffer(raw).read()  # type: ignore[return-value]
+
+
+def _build_ising_tbos(
+    normalized: dict[str, t.Any],
+    init_state: SampleSet | None,
+) -> Buffer:
+    """Encode normalised Ising model (and optional initial spectrum) as tbos bytes."""
+    size: int = normalized['size']
+    rows_0 = normalized['rows'] - 1
+    cols_0 = normalized['cols'] - 1
+    values = normalized['values']
+    is_sparse = len(values) / max(1, size * size) <= SPARSE_THRESHOLD
+
+    if is_sparse:
+        couplings_enc = coo_matrix((size, size), rows_0, cols_0, values)
+    else:
+        dense = np.zeros((size, size), dtype=values.dtype)
+        if len(values):
+            dense[rows_0, cols_0] = values
+        couplings_enc = dense
+
+    data: dict[str, t.Any] = {
+        'Ising': {
+            'type': 'BinaryQuadraticModel',
+            'var_type': 'SPIN',
+            'L': size,
+            'biases': normalized['biases'],
+            'couplings': couplings_enc,
+            'couplings_sparse': is_sparse,
+        },
+    }
+    if init_state is not None:
+        data['Spectrum'] = {
+            'type': 'Spectrum',
+            'var_type': 'SPIN',
+            'energies': init_state.record.energy,
+            'states': init_state.record.sample,
+            'L': size,
+            'num_rep': len(init_state.record.energy),
+        }
+
+    buf = Buffer()
+    buf.write(data)
+    return buf
+
+def _collect_ws_result(ws: ClientConnection) -> dict[str, t.Any]:
+    """Accumulate ``result_chunk`` frames until ``result_done``."""
+    buffer = Buffer()
+    while True:
+        msg = _tbos_ws_recv(ws)
+        msg_type = msg.get('type')
+        if msg_type == 'error':
+            msg_0 = f"Server error: {msg.get('message', 'unknown')}"
+            raise RuntimeError(msg_0)
+        if msg_type == 'result_chunk':
+            chunk = msg['data']
+            buffer.write_bytes(chunk.tobytes() if isinstance(chunk, np.ndarray) else bytes(chunk))
+        elif msg_type == 'result_done':
+            break
+        else:
+            msg_1 = f'Unexpected server message: {msg_type!r}'
+            raise RuntimeError(msg_1)
+    buffer.seek(0)
+    return buffer.read()

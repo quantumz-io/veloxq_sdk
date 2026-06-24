@@ -12,7 +12,7 @@ import typing as t
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
-from dimod.sampleset import SampleSet
+from dimod import BinaryQuadraticModel, SampleSet
 
 from veloxq_sdk.api.backends import BaseBackend, VeloxQH100_1
 from veloxq_sdk.api.core.base import BaseModel
@@ -45,125 +45,24 @@ class BaseSolver(BaseModel):
     parameters: VeloxQParameters
     backend: BaseBackend
 
-    @t.overload
     def sample(
         self,
-        instance: InstanceLike,
-        *,
-        name: str | None = None,
-        problem: Problem | None = None,
+        bqm: BinaryQuadraticModel,
         init_state: SampleSet | None = None,
-        force: bool = False,
+        **kwargs: t.Any,
     ) -> VeloxSampleSet:
-        """Solve a problem instance using the solver.
-
-        This method takes an instance of a problem (such as Ising model data or
-        a local file), submits a job to the VeloxQ platform, waits for its completion,
-        and finally returns the job result.
-
-        Args:
-            instance (InstanceLike): An instance of a problem to be solved.
-            name (str | None): Optional name for the job. Defaults to None.
-            problem (Problem | None): Optional problem instance to use. Defaults to None.
-            force (bool): If True, forces the creation of a new file even if it already exists.
-                Defaults to False.
-
-        Returns:
-            VeloxSampleSet: An object that provides access to the completed job's results.
-
-        Example:
-            >>> solver = VeloxQSolver()
-            >>> result = solver.sample('problem_1.txt')
-            >>> print(result.data['Spectrum']['energies'][:])
-
-        """
-
-    @t.overload
-    def sample(
-        self,
-        biases: BiasesType,
-        coupling: CouplingsType,
-        *,
-        name: str | None = None,
-        problem: Problem | None = None,
-        init_state: SampleSet | None = None,
-        force: bool = False,
-    ) -> VeloxSampleSet:
-        """Solve a problem instance using the solver.
-
-        This method takes an instance of a problem (such as Ising model data or
-        a local file), submits a job to the VeloxQ platform, waits for its completion,
-        and finally returns the job result.
-
-        Args:
-            biases (BiasesType): Biases for the problem instance.
-            coupling (CouplingsType): Coupling matrices for the problem instance.
-            name (str | None): Optional name for the job. Defaults to None.
-            problem (Problem | None): Optional problem instance to use. Defaults to None.
-            force (bool): If True, forces the creation of a new file even if it already exists.
-                Defaults to False.
-
-        Returns:
-            VeloxSampleSet: An object that provides access to the completed job's results.
-
-        Example:
-            >>> solver = VeloxQSolver()
-            >>> h = np.array([1, -1])
-            >>> J = np.array([[0, -1], [-1, 0]])
-            >>> result = solver.sample(h, J)
-            >>> print(result.data['Spectrum']['energies'][:])
-
-        """
-
-    def sample(
-        self,
-        *args,
-        name: str | None = None,
-        problem: Problem | None = None,
-        init_state: SampleSet | None = None,
-        force: bool = False,
-        **kwargs,
-    ) -> VeloxSampleSet:
-        """Solve a problem instance using the solver.
-
-        This method takes an instance of a problem (such as Ising model data or
-        a local file), submits a job to the VeloxQ platform, waits for its completion,
-        and finally returns the job result.
-
-        Args:
-            *args: Positional arguments that can be either an instance of `InstanceLike`
-                or a tuple of biases and coupling matrices.
-            name (str | None): Optional name for the job. Defaults to None.
-            problem (Problem | None): Optional problem instance to use. Defaults to None.
-            force (bool): If True, forces the creation of a new file even if it already exists.
-                Defaults to False.
-            **kwargs: Can receive coupling and biases as keyword arguments if not provided
-                as positional arguments.
-
-        Returns:
-            VeloxSampleSet: An object that provides access to the completed job's results.
-
-        Example:
-            >>> solver = VeloxQSolver()
-            >>> instance = {'biases': [1, -1], 'coupling': [[0, -1], [-1, 0]]}
-            >>> result = solver.sample(instance)
-            >>> print(result.data['Spectrum']['energies'][:])
-
-        """
-        if len(args) == 1:
-            instance = args[0]
-        elif len(args) == 2:
-            instance = args
-        elif len(args) != 0:
-            msg = f'Expected 1 or 2 positional arguments, got {len(args)}.'
-            raise ValueError(msg)
-        else:
-            instance = kwargs
-
-        file = File.from_instance(instance, name=name, problem=problem, init_state=init_state, force=force)  # type: ignore[arg-type]
-        job = self.submit(file)
-        job.wait_for_completion()
-        return job.result
+        # file = File.from_instance(instance, name=name, problem=problem, init_state=init_state, force=force)  # type: ignore[arg-type]
+        # job = self.submit(file)
+        # job.wait_for_completion()
+        spin = bqm.spin
+        return Job.launch_ws(
+            self.id,
+            self.backend.id,
+            spin.linear,
+            spin.quadratic,
+            self.parameters.model_dump(),
+            init_state=init_state,
+        )
 
     def submit(self, file: File) -> Job:
         """Submit a file to this solver on the VeloxQ platform.
