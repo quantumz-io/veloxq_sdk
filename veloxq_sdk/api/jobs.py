@@ -697,13 +697,19 @@ def _build_ising_tbos(
         },
     }
     if init_state is not None:
+        states = init_state.record.sample
+        energies = init_state.record.energy
+        num_rep = energies.shape[0]
+        if energies.shape != (num_rep,) or states.shape != (num_rep, size):
+            msg = "Initial SampleSet needs to have consistent size and fit the instance."
+            raise TypeError(msg)
         data['Spectrum'] = {
             'type': 'Spectrum',
             'var_type': 'SPIN',
-            'energies': init_state.record.energy,
-            'states': init_state.record.sample,
+            'energies': energies,
+            'states': states.T,
             'L': size,
-            'num_rep': len(init_state.record.energy),
+            'num_rep': num_rep,
         }
 
     buf = Buffer()
