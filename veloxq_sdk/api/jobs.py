@@ -529,13 +529,14 @@ class VeloxSampleSet(SampleSet):
         samples = file['Spectrum/states']
         energies = file['Spectrum/energies']
 
-        info = {}
+        info = json.loads(file['Spectrum']['metadata'][()])
 
-        for key in file['Spectrum'].keys() - {'states', 'energies'}:
-            try:
-                info.update(**json.loads(file['Spectrum'][key][()]))
-            except TypeError:
-                info[key] = file['Spectrum'][key][()]
+        labels = info.pop('labels', [])
+        if labels:
+            samples = dict(zip(labels, samples))
+
+        for key in file['Spectrum'].keys() - {'states', 'energies', 'metadata'}:
+            info[key] = file['Spectrum'][key][()]
 
         return cls.from_samples(
             samples,
