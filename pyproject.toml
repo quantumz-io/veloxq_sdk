@@ -1,7 +1,11 @@
+[build-system]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.5.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "veloxq_sdk"
 description = ""
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 authors = [
     {name="Hendrik D Louzada", email="hendriklouzada@qmz.ai"}
 ]
@@ -13,13 +17,13 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
 
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
-dynamic = ["version"]
+dynamic = ["version", "urls"]
 dependencies = [
     "python-dateutil>=2.8.0",
     "traitlets>=5.0.0",
@@ -31,7 +35,6 @@ dependencies = [
     "dimod>=0.12.0"
 ]
 
-
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -39,20 +42,23 @@ dev = [
     "ruff",
 ]
 
-[project.scripts]
-spam-cli = "spam:main_cli"
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools]
-packages = {find = {include = ["veloxq_sdk", "veloxq_sdk.*"]}}
+[tool.hatch.build.hooks.vcs]
+version-file = "veloxq_sdk/_version.py"
 
-[tool.setuptools.dynamic]
-version = {attr = "veloxq_sdk.__version__"}
+[tool.hatch.build.targets.wheel]
+exclude = [
+    "**/tests"
+]
 
-[build-system]
-requires = ["setuptools"]
+[tool.hatch.metadata.hooks.vcs.urls]
+Homepage = "https://github.com/quantumz-io/veloxq_sdk"
+source_archive = "https://github.com/quantumz-io/veloxq_sdk/archive/{commit_hash}.zip"
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 select = ["ALL"]
 ignore = [
     "FURB122"  # Allow IOBase.write in a for loop.
