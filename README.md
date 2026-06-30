@@ -9,7 +9,7 @@ Find additional guides on configuration, jobs, solvers and result files in the [
 
 ## Installation & Setup
 
-Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.8+:
+Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.9+:
 
 ```shell
 pip install git+https://github.com/quantumz-io/veloxq_sdk.git
