@@ -531,17 +531,20 @@ class VeloxSampleSet(SampleSet):
 
         info = json.loads(file['Spectrum']['metadata'][()])
 
-        labels = info.pop('labels', [])
-        if labels:
-            samples = dict(zip(labels, samples))
+        labels = file.get('Spectrum/labels', None)
 
-        for key in file['Spectrum'].keys() - {'states', 'energies', 'metadata'}:
+        for key in file['Spectrum'].keys() - {'states', 'energies', 'metadata', 'labels'}:
             info[key] = file['Spectrum'][key][()]
 
-        return cls.from_samples(
+        sampleset = cls.from_samples(
             samples,
             energy=energies,
             vartype=SPIN,
             info=info,
             aggregate_samples=True,
         )
+
+        if labels is not None:
+            sampleset.relabel_variables(dict(enumerate(labels.asstr(encoding='utf-8'))))
+
+        return sampleset
