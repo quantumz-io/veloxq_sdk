@@ -151,25 +151,47 @@ class JobStatistics(BasePydanticModel):
     """Statistical information about a job's execution.
 
     Attributes:
-        usage_time (float): Amount of usage time in hours.
-        pending_time (float): Time spent in pending state.
-        running_time (float): Time spent running.
-        total_cost (float): Total cost in dollars.
-        solver_cost (float): The solver's hourly cost.
-        backend_cost (float): The backend's hourly cost.
-        total_backend_cost (float): The total backend cost in dollars.
-        total_usage_cost (float): The total usage cost in dollars.
+        usage_time (float): Amount of usage time in seconds.
+        pending_time (float): Time spent in pending state, in seconds.
+        running_time (float): Time spent running, in seconds.
+        quota_solver_time (float): Solver time used for quota calculation, in seconds.
+        cost_solver_time (float): Solver time used for cost calculation, in seconds.
+        solver_cost (float): The solver's cost in dollars per second.
+        solver_usage_scale (float): Scaling factor for solver quota usage.
+        backend_cost_scale (float): Scaling factor for backend cost.
+        backend_usage_scale (float): Scaling factor for backend quota usage.
+        total_cost (float): Total cost of the job in dollars.
+        total_quota_usage (int): Total job quota usage.
 
     """
 
-    usage_time: float = Field(default=0.0, description='Usage time in hours')
-    pending_time: float = Field(default=0.0, description='Pending time in hours')
-    running_time: float = Field(default=0.0, description='Running time in hours')
-    total_cost: float = Field(default=0.0, description='Total cost in dollars')
-    solver_cost: float = Field(default=0.0, description='Backend cost per hour')
-    backend_cost: float = Field(default=0.0, description='Backend cost per hour')
-    total_backend_cost: float = Field(default=0.0, description='Total backend cost in dollars')
-    total_usage_cost: float = Field(default=0.0, description='Total usage cost in dollars')
+    usage_time: float = Field(default=0.0, description='Usage time in seconds')
+    pending_time: float = Field(default=0.0, description='Pending time in seconds')
+    running_time: float = Field(default=0.0, description='Running time in seconds')
+    quota_solver_time: float = Field(
+        default=0.0,
+        description='Solver time that was used for quota calculation in seconds',
+    )
+    cost_solver_time: float = Field(
+        default=0.0,
+        description='Solver time that was used for cost calculation in seconds',
+    )
+    solver_cost: float = Field(
+        default=0.0, description='Solver cost in dollars per second',
+    )
+    solver_usage_scale: float = Field(
+        default=1.0, description='Scaling factor for solver quota usage',
+    )
+    backend_cost_scale: float = Field(
+        default=1.0, description='Scaling factor for backend cost',
+    )
+    backend_usage_scale: float = Field(
+        default=1.0, description='Scaling factor for backend quota usage',
+    )
+    total_cost: float = Field(
+        default=0.0, description='Total cost of the job in dollars',
+    )
+    total_quota_usage: int = Field(default=0, description='Total job quota usage')
 
 
 class JobResultDataItem(BasePydanticModel):
