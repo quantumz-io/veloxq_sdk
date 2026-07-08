@@ -409,7 +409,7 @@ class Job(BaseModel):
             JobResultData: Metadata about the job's result, including type and items.
 
         """
-        response = self.http.get(f'jobs/{self.id}/result-metadata')
+        response = self.http.get(f'jobs/{self.id}/result_metadata')
         return JobResultData._from_response(response)
 
     @cached_property
