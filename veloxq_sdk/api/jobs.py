@@ -102,6 +102,8 @@ class JobStatus(Enum):
         CREATED (str): The job has been created but not yet queued or running.
         PENDING (str): The job is in line waiting to be processed.
         RUNNING (str): The job is actively being processed.
+        PAUSED (str): The job has been paused (not supported yet).
+        CANCELED (str): The job was canceled before completing.
         COMPLETED (str): The job finished successfully.
         FAILED (str): The job encountered an error and did not complete successfully.
 
@@ -110,6 +112,8 @@ class JobStatus(Enum):
     CREATED = 'created'
     PENDING = 'pending'
     RUNNING = 'running'
+    PAUSED = 'paused'
+    CANCELED = 'canceled'
     COMPLETED = 'completed'
     FAILED = 'failed'
 
@@ -311,7 +315,12 @@ class Job(BaseModel):
             TimeoutError: If the job does not complete by 'timeout' seconds.
 
         """
-        if self.status in {JobStatus.COMPLETED.value, JobStatus.FAILED.value}:
+        terminal_statuses = {
+            JobStatus.COMPLETED.value,
+            JobStatus.FAILED.value,
+            JobStatus.CANCELED.value,
+        }
+        if self.status in terminal_statuses:
             return
         start_time = time.monotonic()
         status_update = {}
