@@ -9,27 +9,33 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import typing as t
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-import httpx
-from pydantic.alias_generators import to_camel
-from pydantic import BaseModel as PydanticBaseModel
-from typing_extensions import TypedDict
-from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import h5py
+import httpx
 import numpy as np
 from dimod import BinaryQuadraticModel
-from dimod.views.quadratic import Linear, Quadratic
 from dimod.sampleset import SampleSet
+from dimod.views.quadratic import Linear, Quadratic
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, TypeAdapter
+from pydantic.alias_generators import to_camel
+from typing_extensions import TypedDict
 
 from veloxq_sdk.api.core.base import BaseModel, build_adapters
 from veloxq_sdk.config import VeloxQAPIConfig
 
 _logger = logging.getLogger(__name__)
+
+
+def _is_azure_blob_url(url: str) -> bool:
+    return (urlparse(url).netloc or "").endswith(".blob.core.windows.net")
 
 InstanceLike = t.Union[
     "InstanceDict",
@@ -133,17 +139,14 @@ class Problem(BaseModel):
             "_sort": "created_at",
             "_order": "desc",
         }
-        if name:
+        if name and exact:
+            params["name"] = name
+        elif name:
             params["q"] = name
 
         response = self._http.get(f"problems/{self.id}/files", params=params)
         response.raise_for_status()
-        data = File._from_paginated_response(response)
-
-        if exact:
-            return list(filter(lambda item: item.name == name, data))
-
-        return data
+        return File._from_paginated_response(response)
 
     def new_file(self, name: str, size: int) -> File:
         """Create a new file for this problem.
@@ -157,26 +160,6 @@ class Problem(BaseModel):
 
         """
         return File.create(name=name, size=size, problem=self)
-
-    @classmethod
-    def undefined(cls) -> Problem:
-        """Retrieve or create a default "undefined" Problem instance.
-
-        Used when no specific problem context was provided.
-
-        Returns:
-            Problem: The default Problem with the name "undefined".
-
-        """
-        response = cls._http.get(
-            "problems", params={"_page": 1, "_limit": 1, "q": "undefined"}
-        )
-        response.raise_for_status()
-        data = cls._from_paginated_response(response)
-        if data:
-            return data[0]
-
-        return cls.create(name="undefined")
 
     @classmethod
     def create(cls, name: str) -> Problem:
@@ -253,7 +236,14 @@ class File(BaseModel):
     uploaded_bytes: int = Field(
         description="The number of bytes that have been uploaded."
     )
-    problem_id: str = Field(description="The problem id associated with this file.")
+    problem_id: t.Optional[str] = Field(
+        default=None,
+        description=(
+            "The problem id associated with this file. None marks a temporary "
+            "file not attached to any problem; the server deletes such files "
+            "after its retention period."
+        ),
+    )
     created_at: datetime = Field(
         description="The date and time when the file was created."
     )
@@ -295,24 +285,30 @@ class File(BaseModel):
                 callback(item[1])
                 return item[0]
 
-            with ThreadPoolExecutor(config.multipart_upload_thread_count) as executor:
-                uploaded_chunks = list(
-                    map(
-                        _callback,
-                        executor.map(
-                            self.upload_part,
-                            [file_path] * len(self.chunks),
-                            self.chunks,
-                        ),
+            try:
+                with ThreadPoolExecutor(
+                    config.multipart_upload_thread_count
+                ) as executor:
+                    uploaded_chunks = list(
+                        map(
+                            _callback,
+                            executor.map(
+                                self.upload_part,
+                                [file_path] * len(self.chunks),
+                                self.chunks,
+                            ),
+                        )
                     )
+                response = self.file._http.post(
+                    self.file._direct_complete_endpoint,
+                    json={
+                        "parts": uploaded_chunks,
+                    },
                 )
-            response = self.file._http.post(
-                f"/problems/{self.file.problem_id}/files/{self.file.id}/direct/complete",
-                json={
-                    "parts": uploaded_chunks,
-                },
-            )
-            return self.file._update_from_response(response)
+                return self.file._update_from_response(response)
+            except BaseException:
+                self.file._cancel_on_error()
+                raise
 
         def upload_part(
             self, file_path: Path, chunk: _PreasignedUploadChunk
@@ -323,17 +319,20 @@ class File(BaseModel):
                     "Please request a new upload URL and retry the upload."
                 )
                 raise ValueError(msg)
-            chunk_size = self.file.size // len(self.chunks)
+            config = VeloxQAPIConfig.instance()
+            chunk_size = config.multipart_upload_chunk_size
+            offset = (chunk["part_number"] - 1) * chunk_size
+            length = min(chunk_size, self.file.size - offset)
             with file_path.open("rb") as f:
-                f.seek((chunk["part_number"] - 1) * chunk_size)
-                data = f.read(chunk_size)
+                f.seek(offset)
+                data = f.read(length)
             response = httpx.put(chunk["upload_url"], content=data, timeout=3600)
             response.raise_for_status()
+            part: dict[str, t.Any] = {"part_number": chunk["part_number"]}
             etag = response.headers.get("ETag")
-            if etag is None:
-                msg = f"ETag header missing in response for part {chunk['part_number']}"
-                raise RuntimeError(msg)
-            return {"part_number": chunk["part_number"], "etag": etag}, len(data)
+            if etag is not None:
+                part["etag"] = etag
+            return part, len(data)
 
     class _PreassignedUploader(PydanticBaseModel):
         """Helper class for multipart chunked uploads."""
@@ -352,25 +351,46 @@ class File(BaseModel):
             file_path: Path,
             callback: t.Callable[[int], None] = lambda _: None,
         ) -> File:
-            if datetime.now(timezone.utc) > self.expires_at:
-                msg = (
-                    "Upload URL has expired. Please request a new ",
-                    "upload URL and retry the upload.",
+            headers = {}
+            if _is_azure_blob_url(self.upload_url):
+                # Azure's Put Blob operation requires the blob type header;
+                headers["x-ms-blob-type"] = "BlockBlob"
+            try:
+                if datetime.now(timezone.utc) > self.expires_at:
+                    msg = (
+                        "Upload URL has expired. Please request a new "
+                        "upload URL and retry the upload."
+                    )
+                    raise ValueError(msg)
+                with file_path.open("rb") as f:
+                    data = f.read()
+                httpx.put(
+                    self.upload_url, content=data, headers=headers, timeout=3600
+                ).raise_for_status()
+                callback(len(data))
+                response = self.file._http.post(
+                    self.file._direct_complete_endpoint,
+                    json={},
                 )
-                raise ValueError(msg)
-            with file_path.open("rb") as f:
-                data = f.read()
-            httpx.put(self.upload_url, content=data, timeout=3600).raise_for_status()
-            callback(len(data))
-            response = self.file._http.post(
-                f"/problems/{self.file.problem_id}/files/{self.file.id}/direct/complete",
-                json={},
-            )
-            return self.file._update_from_response(response)
+                return self.file._update_from_response(response)
+            except BaseException:
+                self.file._cancel_on_error()
+                raise
 
     _uploader: t.ClassVar[TypeAdapter] = TypeAdapter(
         t.Union[_PreassignedUploader, _PreassignedChunkUploader],
     )
+
+    @property
+    def is_temporary(self) -> bool:
+        """True when the file is not attached to any problem (problem=NULL)."""
+        return self.problem_id is None
+
+    @property
+    def _direct_complete_endpoint(self) -> str:
+        if self.problem_id is None:
+            return f"/files/{self.id}/direct/complete"
+        return f"/problems/{self.problem_id}/files/{self.id}/direct/complete"
 
     def upload(
         self,
@@ -386,14 +406,20 @@ class File(BaseModel):
             upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
 
         """
-        with self.http.open_ws(
-            f"problems/{self.problem_id}/files/{self.id}/upload/ws",
-        ) as ws:
-            while data := content.read(chunk_size):
-                ws.send(data)
-                ws.recv()
-                upload_callback(len(data))
-            ws.send(b"")
+        if self.problem_id is None:
+            ws_endpoint = f"files/{self.id}/upload/ws"
+        else:
+            ws_endpoint = f"problems/{self.problem_id}/files/{self.id}/upload/ws"
+        try:
+            with self.http.open_ws(ws_endpoint) as ws:
+                while data := content.read(chunk_size):
+                    ws.send(data)
+                    ws.recv()
+                    upload_callback(len(data))
+                ws.send(b"")
+        except BaseException:
+            self._cancel_on_error()
+            raise
         self.refresh()
 
     def download(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
@@ -404,7 +430,10 @@ class File(BaseModel):
             chunk_size (int): Size of the data chunks to read. Defaults to 1 MB.
 
         """
-        download_url = self.http.get(f"problems/{self.problem_id}/files/{self.id}")
+        if self.problem_id is None:
+            download_url = self.http.get(f"files/{self.id}/download")
+        else:
+            download_url = self.http.get(f"problems/{self.problem_id}/files/{self.id}")
         download_url.raise_for_status()
         with self.http.stream(
             "GET", download_url.text.strip("'").strip('"')
@@ -415,26 +444,47 @@ class File(BaseModel):
 
     def cancel(self) -> None:
         """Cancel the file upload on the VeloxQ platform."""
-        response = self._http.delete(
-            f"problems/{self.problem_id}/files/{self.id}/cancel"
-        )
+        response = self._http.delete(f"files/{self.id}/cancel")
         response.raise_for_status()
         self.refresh()
 
+    def _cancel_on_error(self) -> None:
+        """Best-effort cancel used when an upload fails midway.
+
+        Failures are logged and swallowed so the original upload error
+        propagates to the caller.
+        """
+        try:
+            self.cancel()
+        except Exception:
+            _logger.warning(
+                "Failed to cancel upload for file %s after an upload error.",
+                self.id,
+                exc_info=True,
+            )
+
     def delete(self) -> None:
-        """Delete this file from the VeloxQ platform."""
-        response = self._http.delete(f"problems/{self.problem_id}/files/{self.id}")
+        """Delete this file from the VeloxQ platform.
+
+        The blob is removed from storage and the entry erased from the database.
+        """
+        response = self._http.delete(f"files/{self.id}")
         response.raise_for_status()
 
     def refresh(self) -> None:
         """Refresh the file data from the API."""
-        response = self._http.get(
-            f"/problems/{self.problem_id}/files/{self.id}/upload-status",
-        )
+        response = self._http.get(f"/files/{self.id}")
         self._update_from_response(response)
 
     @classmethod
-    def create(cls, name: str, size: int, problem: Problem | None = None) -> File:
+    def create(
+        cls,
+        name: str,
+        size: int,
+        problem: Problem | None = None,
+        *,
+        force: bool = False,
+    ) -> File:
         """Create a new file on the VeloxQ platform.
 
         This method requests an upload URL for a new file, and returns the related File.
@@ -444,16 +494,23 @@ class File(BaseModel):
             name (str): The name of the file to create.
             size (int): The file size in bytes.
             problem (Problem | None): Optional problem to associate with.
-                If None, a default "undefined" problem is used.
+                If None, a temporary file (problem=NULL) is created; the
+                server deletes temporary files after its retention period.
+            force (bool): Replace an existing completed file with the same
+                name. Files in a failed/canceled/removed state are replaced
+                automatically; an upload in flight always raises a conflict.
 
         Returns:
             File: A File object representing the newly created entry on the server.
 
         """
-        problem = problem or Problem.undefined()
+        if problem is None:
+            endpoint = "files/upload-request"
+        else:
+            endpoint = f"problems/{problem.id}/files/upload-request"
         response = cls._http.post(
-            f"problems/{problem.id}/files/upload-request",
-            json={"file_name": name, "size": size},
+            endpoint,
+            json={"file_name": name, "size": size, "force": force},
         )
         return cls._from_response(response)
 
@@ -463,6 +520,8 @@ class File(BaseModel):
         name: str,
         size: int,
         problem: Problem | None = None,
+        *,
+        force: bool = False,
     ) -> _PreassignedUploader | _PreassignedChunkUploader:
         """Initiate a upload for a new file and retrieve the upload plan.
 
@@ -473,7 +532,11 @@ class File(BaseModel):
             name (str): The name of the file to create.
             size (int): The total file size in bytes.
             problem (Problem | None): Optional problem to associate with.
-                If None, a default "undefined" problem is used.
+                If None, a temporary file (problem=NULL) is created; the
+                server deletes temporary files after its retention period.
+            force (bool): Replace an existing completed file with the same
+                name. Files in a failed/canceled/removed state are replaced
+                automatically; an upload in flight always raises a conflict.
 
         Returns:
             _PreassignedUploader | _PreassignedChunkUploader: An object containing the file reference and upload plan.
@@ -486,10 +549,18 @@ class File(BaseModel):
             num_chunks = size // settings.multipart_upload_chunk_size + bool(
                 size % settings.multipart_upload_chunk_size
             )
-        problem = problem or Problem.undefined()
+        if problem is None:
+            endpoint = "files/direct"
+        else:
+            endpoint = f"problems/{problem.id}/files/direct"
         response = cls._http.post(
-            f"problems/{problem.id}/files/direct",
-            json={"file_name": name, "size": size, "num_chunks": num_chunks},
+            endpoint,
+            json={
+                "file_name": name,
+                "size": size,
+                "num_chunks": num_chunks,
+                "force": force,
+            },
         )
         response.raise_for_status()
         return cls._uploader.validate_json(response.content)
@@ -512,32 +583,40 @@ class File(BaseModel):
             "_sort": "created_at",
             "_order": "desc",
         }
-        if name:
+        if name and exact:
+            params["name"] = name
+        elif name:
             params["q"] = name
 
         response = cls._http.get("files", params=params)
         response.raise_for_status()
-        data = cls._from_paginated_response(response)
-        if exact:
-            return list(filter(lambda item: item.name == name, data))
-        return data
+        return cls._from_paginated_response(response)
 
     @classmethod
     def get_file(cls, name: str, problem: Problem | None = None) -> File | None:
-        """Get a single File instance by name.
+        """Get a single File instance by exact name.
 
         Args:
             name (str): The name of the file to retrieve.
-            problem (Problem | None): Optional Problem to scope the search within.
+            problem (Problem | None): Optional Problem to scope the search
+                within. If None, only temporary files (problem=NULL) are
+                searched.
 
         Returns:
             File | None: The matching File object, or None if not found.
 
         """
+        params: dict[str, t.Any] = {
+            "name": name,
+            "_limit": 1,
+        }
         if problem is None:
-            problem = Problem.undefined()
-
-        existing_files = problem.get_files(name=name, limit=1, exact=True)
+            params["no_problem"] = True
+            response = cls._http.get("files", params=params)
+        else:
+            response = cls._http.get(f"problems/{problem.id}/files", params=params)
+        response.raise_for_status()
+        existing_files = cls._from_paginated_response(response)
         if existing_files:
             return existing_files[0]
         return None
@@ -792,14 +871,14 @@ class File(BaseModel):
 
                 cls._write_ising_hdf5(temp_file, biases, couplings, init_state=init_state, offset=offset)
                 temp_file.flush()
-                temp_file_size = temp_file.tell()
+                temp_file_size = temp_file.seek(0, os.SEEK_END)
                 temp_file.seek(0)
                 name = name or (cls._create_hash(temp_file) + ".h5")
 
             if not force and (file := cls.get_file(name=name, problem=problem)):
                 return file
             file_uploader = cls.create_direct(
-                name=name, size=temp_file_size, problem=problem
+                name=name, size=temp_file_size, problem=problem, force=force
             )
             return file_uploader.upload(temp_file_path, callback=upload_callback)
         finally:
@@ -847,7 +926,7 @@ class File(BaseModel):
             return file
 
         file_uploader = cls.create_direct(
-            name=name, size=path.stat().st_size, problem=problem
+            name=name, size=path.stat().st_size, problem=problem, force=force
         )
         return file_uploader.upload(path, callback=upload_callback)
 
@@ -892,7 +971,9 @@ class File(BaseModel):
         if not force and (file := cls.get_file(name=name, problem=problem)):
             return file
 
-        new_file = cls.create(name=name, size=data.seek(0, 2), problem=problem)
+        new_file = cls.create(
+            name=name, size=data.seek(0, os.SEEK_END), problem=problem, force=force
+        )
         data.seek(0)
         new_file.upload(data)
         return new_file
