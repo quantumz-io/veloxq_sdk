@@ -277,8 +277,10 @@ class Job(BaseModel):
         description='Timeline of the job status changes.',
     )
 
-    file: t.Annotated[File, BeforeValidator(File.model_validate)] = Field(
-        description='The input file associated with the job.',
+    file: t.Optional[
+        t.Annotated[File, BeforeValidator(File.model_validate)]
+    ] = Field(
+        default=None,
     )
 
     def get_job_updates(self, timeout: float | None = None) -> t.Generator[JobUpdate, None, None]:
