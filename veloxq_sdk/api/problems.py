@@ -1160,6 +1160,37 @@ class File(BaseModel):
                 )
 
     @staticmethod
+    def _select_shared_dtype(
+        values: np.ndarray,
+        biases: np.ndarray,
+        *,
+        integral: bool,
+    ) -> np.dtype:
+        """Select a shared dtype for the given arrays."""
+        populated = [array for array in (values, biases) if array.size]
+        if not populated:
+            return np.dtype(np.float32)
+
+        low = min(float(array.min()) for array in populated)
+        high = max(float(array.max()) for array in populated)
+
+        if integral:
+            candidates = (
+                (np.uint8, np.uint16, np.uint32, np.uint64)
+                if low >= 0
+                else (np.int8, np.int16, np.int32, np.int64)
+            )
+            for candidate in candidates:
+                info = np.iinfo(candidate)
+                if info.min <= low and high <= info.max:
+                    return np.dtype(candidate)
+
+        magnitude = max(abs(low), abs(high))
+        if np.isfinite(magnitude) and magnitude > float(np.finfo(np.float32).max):
+            return np.dtype(np.float64)
+        return np.dtype(np.float32)
+
+    @staticmethod
     def _normalize_ising_inputs(
         biases: BiasesType,
         couplings: CouplingsType,
@@ -1205,13 +1236,13 @@ class File(BaseModel):
             if len(key) == 1:
                 canonical_key = key
                 if key[0] not in biases_dict:
-                    biases_dict[key[0]] = 0.0
+                    biases_dict[key[0]] = 0
             elif len(key) == 2:
                 # Canonical ordering: min index first
                 canonical_key = (min(key), max(key)) if key[0] != key[1] else (key[0],)
                 for i in key:
                     if i not in biases_dict:
-                        biases_dict[i] = 0.0
+                        biases_dict[i] = 0
             else:
                 msg = f"Coupling key must have 1 or 2 elements, got {len(key)}"
                 raise ValueError(msg)
@@ -1233,7 +1264,6 @@ class File(BaseModel):
         # Create label mapping
         label_to_idx = {label: idx for idx, label in enumerate(biases_dict.keys())}
         size = len(label_to_idx)
-        idx_dtype: np.dtype[np.integer] = np.min_scalar_type(size)
 
         # Estimate size: diagonal + off-diagonal elements (symmetrized)
         num_couplings = len(couplings_dict)
@@ -1241,12 +1271,15 @@ class File(BaseModel):
         num_off_diag = sum(1 for key in couplings_dict.keys() if len(key) == 2)
         total_entries = num_couplings + num_off_diag  # diagonal + 2x off-diagonal
 
+        idx_dtype: np.dtype[np.integer] = np.min_scalar_type(
+            max(size, total_entries + 1),
+        )
+
         rows_list = np.empty(total_entries, dtype=idx_dtype)
         cols_list = np.empty(total_entries, dtype=idx_dtype)
         values_list = np.empty(total_entries, dtype=float)
 
         idx = 0
-        max_value = -np.inf
         for key, val in couplings_dict.items():
             if len(key) == 1:
                 u = key[0]
@@ -1270,8 +1303,6 @@ class File(BaseModel):
                 values_list[idx] = val
                 idx += 1
 
-            max_value = max(max_value, abs(val))
-
         # Trim to actual size
         rows_list = rows_list[:idx]
         cols_list = cols_list[:idx]
@@ -1281,20 +1312,24 @@ class File(BaseModel):
         order = np.lexsort((rows_list, cols_list))
         rows_arr = rows_list[order]
         cols_arr = cols_list[order]
-
-        # Select float32 or float64 for Solver compatibility
-        # Use float32 if values fit, otherwise float64 for precision
-        value_dtype = np.min_scalar_type(max_value if max_value != -np.inf else 0.0)
-        if value_dtype.kind == "f" and value_dtype.itemsize < 4:
-            value_dtype = np.float32
-        values_arr = values_list[order].astype(value_dtype)
+        sorted_values = values_list[order]
 
         # Convert biases to array efficiently
         bias_vals = np.array(list(biases_dict.values()), dtype=float)
-        bias_dtype = np.min_scalar_type(np.abs(bias_vals).max())
-        if bias_dtype.kind == "f" and bias_dtype.itemsize < 4:
-            bias_dtype = np.float32
-        bias_arr = bias_vals.astype(bias_dtype)
+
+        # The solver builds a single BinaryQuadraticModel{T} out of the biases
+        # and the couplings, so both have to be stored under the same dtype.
+        integral = all(
+            isinstance(val, (int, np.integer))
+            for val in (*couplings_dict.values(), *biases_dict.values())
+        )
+        shared_dtype = File._select_shared_dtype(
+            sorted_values,
+            bias_vals,
+            integral=integral,
+        )
+        values_arr = sorted_values.astype(shared_dtype)
+        bias_arr = bias_vals.astype(shared_dtype)
 
         # Convert labels to array of strings for HDF5 compatibility
         labels = np.fromiter(map(str, biases_dict.keys()), dtype=np.dtype("T"))
