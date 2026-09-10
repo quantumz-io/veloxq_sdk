@@ -48,7 +48,7 @@ def update_json(*, finished: bool, status: str = 'running', **overrides) -> dict
     payload = {
         'finished': finished,
         'status': status,
-        'statusMessage': 'Job ended' if finished else 'Job running',
+        'statusMessage': None,
         'updatedAt': '2026-01-02T03:04:05Z',
         'statistics': {'usage_time': 1.5, 'total_cost': 0.25},
         'timeline': [
@@ -141,7 +141,7 @@ class TestWaitForCompletion:
                 update_json(
                     finished=True,
                     status='completed',
-                    status_message='Job ended',
+                    statusMessage='Job ended',
                 ),
             ).encode(),
         ]))
@@ -180,7 +180,7 @@ class TestGetJobUpdates:
                 update_json(
                     finished=True,
                     status='completed',
-                    status_message='done',
+                    statusMessage='done',
                 ),
             ).encode(),
         ]))
