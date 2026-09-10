@@ -377,7 +377,7 @@ class Job(BaseModel):
         self.status = status_update['status']
         if refresh:
             self.statistics = JobStatistics.model_validate(status_update['statistics'])
-            self.timeline = JobTimelineValue.adapters.list.validate_json(status_update['timeline'])
+            self.timeline = JobTimelineValue.adapters.list.validate_python(status_update['timeline'])
             self.status_message = status_update.get('statusMessage')
             self.updated_at = isoparse(status_update['updatedAt'])
 
