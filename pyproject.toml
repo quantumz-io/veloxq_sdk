@@ -10,6 +10,8 @@ authors = [
     {name="Hendrik D Louzada", email="hendriklouzada@qmz.ai"}
 ]
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 3 - Alpha",
 
