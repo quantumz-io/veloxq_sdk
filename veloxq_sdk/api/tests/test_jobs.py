@@ -45,13 +45,11 @@ def job_json(job_id: str = 'j1', status: str = 'running', **overrides) -> dict:
 
 
 def update_json(*, finished: bool, status: str = 'running', **overrides) -> dict:
-    # The live status-update stream serializes snake_case keys, unlike the
-    # camelCase REST payloads.
     payload = {
         'finished': finished,
         'status': status,
-        'status_message': None,
-        'updated_at': '2026-01-02T03:04:05Z',
+        'statusMessage': 'Job ended' if finished else 'Job running',
+        'updatedAt': '2026-01-02T03:04:05Z',
         'statistics': {'usage_time': 1.5, 'total_cost': 0.25},
         'timeline': [
             {'name': 'created', 'value': '2026-01-01T00:00:00Z'},
