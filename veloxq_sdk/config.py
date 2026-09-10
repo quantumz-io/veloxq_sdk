@@ -273,7 +273,9 @@ def load_config(config: ConfigLike | None = None) -> None:
     elif isinstance(config, Config):
         api_config.update_config(config)
     elif isinstance(config, dict):
-        api_config.config.merge(config)
+        # Config() converts nested dicts into Config sections; merging a
+        # plain dict would leave section values traitlets cannot copy.
+        api_config.config.merge(Config(config))
         api_config.update_config(api_config.config)
     elif isinstance(config, Path):
         api_config.load_config_file(config.name, path=str(config.parent))
