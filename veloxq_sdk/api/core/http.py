@@ -31,12 +31,14 @@ class RestClient(httpx.Client):
         super().__init__(verify=config.ssl_context)
         config.observe(self._update_token, names='token')
         config.observe(self._update_url, names='url')
+        config.observe(self._update_ssl_context, names='ssl_context')
         self.headers[self.API_KEY_HEADER] = config.token
         self.base_url = config.url
         self.event_hooks = {
             'response': [self.update_response_reason],
         }
         self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
+        self._ssl_context = config.ssl_context
 
     def _update_token(self, change: dict) -> None:
         """Update the API token in the headers."""
@@ -45,6 +47,11 @@ class RestClient(httpx.Client):
     def _update_url(self, change: dict) -> None:
         """Update the base URL in the client."""
         self.base_url = change['new']
+
+    def _update_ssl_context(self, change: dict) -> None:
+        """Update the SSL context in the client."""
+        self._ssl_context = change['new']
+        self.verify = change['new']
 
     @contextmanager
     def open_ws(self, path: str) -> t.Iterator[ClientConnection]:
@@ -68,7 +75,7 @@ class RestClient(httpx.Client):
                self.API_KEY_HEADER: token,
             }
         )
-        with connect(str(url)) as ws:
+        with connect(str(url), proxy_ssl=self._ssl_context) as ws:
             yield ws  # type: ignore[return]
 
     @staticmethod
