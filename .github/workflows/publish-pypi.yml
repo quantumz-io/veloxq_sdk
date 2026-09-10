@@ -10,8 +10,15 @@ permissions:
   id-token: write
 
 jobs:
+  test:
+    name: Run test matrix
+    uses: ./.github/workflows/python-tests.yml
+    secrets:
+      VELOX_TOKEN: ${{ secrets.VELOX_TOKEN }}
+
   build:
     name: Build distribution
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

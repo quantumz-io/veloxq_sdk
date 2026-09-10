@@ -1,6 +1,11 @@
 name: Pytest
 
 on:
+  workflow_call:
+    secrets:
+      VELOX_TOKEN:
+        required: false
+
   push:
     branches:
       - main
