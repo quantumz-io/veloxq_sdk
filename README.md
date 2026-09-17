@@ -12,7 +12,7 @@ Find additional guides on configuration, jobs, solvers and result files in the [
 Install the VeloxQ API client as part of your Python environment. Ensure you have Python 3.9+:
 
 ```shell
-pip install git+https://github.com/quantumz-io/veloxq_sdk.git
+pip install veloxq-sdk
 ```
 
 > **NOTE:** It is recomended to install this package in a dedicated python environment to prevent any dependency problems.
