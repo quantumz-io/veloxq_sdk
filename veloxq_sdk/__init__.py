@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+
 from veloxq_sdk.backends import (
     VeloxQH100_1,
     VeloxQH100_2,
@@ -26,6 +28,18 @@ from veloxq_sdk.solvers import (
     SBMParameters,
     SBMSolver,
 )
+
+try:
+    from veloxq_sdk._version import __version__
+except ImportError:
+    warnings.warn(
+        "veloxq_sdk._version module not found. "
+        "This may happen if the package is not installed properly. "
+        "Using default version '0.0.0+unknown'.",
+        ImportWarning,
+        stacklevel=2,
+    )
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     'File',
