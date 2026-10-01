@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "veloxq_sdk"
-description = ""
+description = "Python client for the VeloxQ optimization platform."
 requires-python = ">=3.9"
 authors = [
     {name="Hendrik D Louzada", email="hendriklouzada@qmz.ai"}
@@ -13,10 +13,11 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
 
     "Intended Audience :: Developers",
-    "Topic :: Software Development :: Build Tools",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
 
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
