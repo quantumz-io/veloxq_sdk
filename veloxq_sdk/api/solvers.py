@@ -38,6 +38,7 @@ if t.TYPE_CHECKING:
         BiasesType,
         CouplingsType,
         InstanceLike,
+        VartypeLike,
     )
 
 
@@ -65,12 +66,13 @@ class BaseSolver(BaseModel):
         *,
         name: str | None = None,
         problem: Problem | None = None,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
     ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
-        This method takes an instance of a problem (such as Ising model data or
+        This method takes an instance of a problem (such as Ising or QUBO model data or
         a local file), submits a job to the VeloxQ platform, waits for its completion,
         and finally returns the job result.
 
@@ -78,6 +80,11 @@ class BaseSolver(BaseModel):
             instance (InstanceLike): An instance of a problem to be solved.
             name (str | None): Optional name for the job. Defaults to None.
             problem (Problem | None): Optional problem instance to use. Defaults to None.
+            vartype (VartypeLike | None): Variable domain of in-memory instances,
+                'SPIN' (Ising, default) or 'BINARY' (QUBO). A BinaryQuadraticModel
+                is converted to it; a file keeps the domain stored in it.
+            init_state (SampleSet | None): Optional initial states in the model's
+                vartype.
             force (bool): If True, forces the creation of a new file even if it already exists.
                 Defaults to False.
 
@@ -99,12 +106,13 @@ class BaseSolver(BaseModel):
         *,
         name: str | None = None,
         problem: Problem | None = None,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
     ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
-        This method takes an instance of a problem (such as Ising model data or
+        This method takes an instance of a problem (such as Ising or QUBO model data or
         a local file), submits a job to the VeloxQ platform, waits for its completion,
         and finally returns the job result.
 
@@ -113,6 +121,11 @@ class BaseSolver(BaseModel):
             coupling (CouplingsType): Coupling matrices for the problem instance.
             name (str | None): Optional name for the job. Defaults to None.
             problem (Problem | None): Optional problem instance to use. Defaults to None.
+            vartype (VartypeLike | None): Variable domain of in-memory instances,
+                'SPIN' (Ising, default) or 'BINARY' (QUBO). A BinaryQuadraticModel
+                is converted to it; a file keeps the domain stored in it.
+            init_state (SampleSet | None): Optional initial states in the model's
+                vartype.
             force (bool): If True, forces the creation of a new file even if it already exists.
                 Defaults to False.
 
@@ -133,13 +146,14 @@ class BaseSolver(BaseModel):
         *args,
         name: str | None = None,
         problem: Problem | None = None,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
         **kwargs,
     ) -> VeloxSampleSet:
         """Solve a problem instance using the solver.
 
-        This method takes an instance of a problem (such as Ising model data or
+        This method takes an instance of a problem (such as Ising or QUBO model data or
         a local file), submits a job to the VeloxQ platform, waits for its completion,
         and finally returns the job result.
 
@@ -148,6 +162,11 @@ class BaseSolver(BaseModel):
                 or a tuple of biases and coupling matrices.
             name (str | None): Optional name for the job. Defaults to None.
             problem (Problem | None): Optional problem instance to use. Defaults to None.
+            vartype (VartypeLike | None): Variable domain of in-memory instances,
+                'SPIN' (Ising, default) or 'BINARY' (QUBO). A BinaryQuadraticModel
+                is converted to it; a file keeps the domain stored in it.
+            init_state (SampleSet | None): Optional initial states in the model's
+                vartype.
             force (bool): If True, forces the creation of a new file even if it already exists.
                 Defaults to False.
             **kwargs: Can receive coupling and biases as keyword arguments if not provided
@@ -173,7 +192,14 @@ class BaseSolver(BaseModel):
         else:
             instance = kwargs
 
-        file = File.from_instance(instance, name=name, problem=problem, init_state=init_state, force=force)  # type: ignore[arg-type]
+        file = File.from_instance(
+            instance,  # type: ignore[arg-type]
+            name=name,
+            problem=problem,
+            vartype=vartype,
+            init_state=init_state,
+            force=force,
+        )
         job = self.submit(file)
         job.wait_for_completion()
         return job.result

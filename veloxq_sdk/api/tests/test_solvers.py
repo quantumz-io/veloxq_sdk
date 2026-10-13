@@ -82,6 +82,10 @@ class TestSampleDispatch:
             'biases': [1.0], 'couplings': [[0.0]],
         }
 
+    def test_vartype_is_forwarded(self, sample_probe):
+        VeloxQSolver().sample([1.0], [[0.0]], vartype='BINARY')
+        assert sample_probe['vartype'] == 'BINARY'
+
     def test_three_positionals_raise(self, sample_probe):
         with pytest.raises(ValueError, match='1 or 2 positional arguments'):
             VeloxQSolver().sample(1, 2, 3)
