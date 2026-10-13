@@ -34,6 +34,14 @@ When a job completes, the `job.result` property returns a `VeloxSampleSet` objec
   print(job.result.energy)  # Access the energies
   ```
 
+- **`vartype`**: The variable domain of the samples, `dimod.SPIN` for an Ising model and `dimod.BINARY` for a QUBO. It follows the submitted model: an Ising model comes back with -1/+1 states and Ising energies, a QUBO with 0/1 states and QUBO energies. The energies include the model's offset, so for a `dimod.BinaryQuadraticModel` they equal `bqm.energies(job.result.sample)`. See [Variable Domain and Offset](problems-and-files.md#24-variable-domain-and-offset-ising-and-qubo).
+
+  **Example:**
+
+  ```python
+  print(job.result.vartype)  # Vartype.BINARY for a QUBO
+  ```
+
 - **`info`**: A dictionary containing additional information about the solver's result as a whole. This might include metadata such as timing information or solver-specific data.
 
   **Example:**
@@ -164,8 +172,9 @@ with open("result.hdf5", "wb") as f:
 
 Result files downloaded from PLGrid backends are HDF5 files with a `Spectrum` group containing the sampled solutions and metadata:
 
-- `Spectrum/energies` (`float32`, shape `(num_samples,)`): energy value for each sample.
-- `Spectrum/states` (`int8`, shape `(num_samples, num_variables)`): spin states for each sample, using ±1 encoding.
+- `Spectrum` group attributes `type` (`"Spectrum"`) and `var_type` (`"SPIN"` or `"BINARY"`): the variable domain of the states, the same as the submitted model's. A file without `var_type` holds spins, and `job.result.vartype` is read from this attribute.
+- `Spectrum/energies` (`float32`, shape `(num_samples,)`): energy value for each sample in the model's domain, including the model's offset.
+- `Spectrum/states` (`int8`, shape `(num_samples, num_variables)`): states for each sample, using -1/+1 encoding for `SPIN` and 0/1 for `BINARY`.
 - `Spectrum/L` (`int64`): number of variables in the submitted problem.
 - `Spectrum/num_batches` (`int64`): number of solver batches executed.
 - `Spectrum/num_rep` (`int64`): number of repetitions performed.

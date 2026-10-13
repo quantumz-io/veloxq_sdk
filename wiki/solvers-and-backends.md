@@ -91,3 +91,35 @@ from veloxq_sdk import VeloxQH100_2
 
 solver.backend = VeloxQH100_2()
 ```
+
+## 5. Submitting a Model to a Solver
+
+Every solver offers two entry points. `sample` is blocking: it creates the file, submits the job, waits for completion, and returns the result as a `VeloxSampleSet`. `submit` takes an existing `File` and returns the `Job` without waiting (see [Jobs](jobs.md#1-submitting-jobs)).
+
+`sample` accepts the same inputs as `File.from_instance`: a file path, a `File`, a `(biases, couplings)` tuple, a dictionary with `"biases"` and `"couplings"` keys, keyword arguments `biases=` and `couplings=`, or a `dimod.BinaryQuadraticModel`. Its keyword arguments are:
+
+- `vartype`: the variable domain of in-memory data, `"SPIN"` (Ising, the default) or `"BINARY"` (QUBO). A `BinaryQuadraticModel` is converted to this domain when it differs from its own. A file path or `File` keeps the domain stored in it, and `vartype` is ignored with a warning.
+- `init_state`: an optional `dimod.SampleSet` of initial states in the model's domain.
+- `name`, `problem`, `force`: file naming, grouping, and overwrite behavior, as in `File.from_instance`.
+
+```python
+import numpy as np
+from veloxq_sdk import VeloxQSolver
+
+solver = VeloxQSolver()
+
+# Ising: spins in {-1, +1}
+h = np.array([1.0, -1.0, 0.0])
+J = np.array([[0, -1, 0], [-1, 0, -1], [0, -1, 0]])
+result = solver.sample(h, J)
+print(result.vartype)  # Vartype.SPIN
+
+# QUBO: bits in {0, 1}
+q = np.array([1.0, 1.0, 1.0])
+Q = np.array([[0, -2, 0], [-2, 0, -2], [0, -2, 0]])
+result = solver.sample(q, Q, vartype="BINARY")
+print(result.vartype)  # Vartype.BINARY
+print(result.first)    # Sample(sample={0: 1, 1: 1, 2: 1}, energy=-1.0, ...)
+```
+
+The result is in the submitted domain. To carry an energy offset with plain arrays, build the file first with `File.from_ising(...)` or `File.from_qubo(...)` and pass it to `sample` or `submit`. See [Variable Domain and Offset](problems-and-files.md#24-variable-domain-and-offset-ising-and-qubo).
