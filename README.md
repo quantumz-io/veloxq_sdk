@@ -103,6 +103,33 @@ It accepts the same argument types as `File.from_instance`.
   print(result.sample)  # print all found states
   ```
 
+  The model is submitted in its own variable domain, SPIN or BINARY, together
+  with its offset, so `result.energy` equals `bqm.energies(result.sample)`.
+
+- **QUBO (binary variables)**
+
+  ```python
+  import numpy as np
+  from veloxq_sdk import VeloxQSolver
+
+  solver = VeloxQSolver()
+
+  # E(x) = sum_i q_i x_i + sum_{i<j} Q_ij x_i x_j, with x_i in {0, 1}
+  q = np.array([1.0, 1.0, 1.0])
+  Q = np.array([
+      [0, -2, 0],
+      [-2, 0, -2],
+      [0, -2, 0],
+  ])
+
+  result = solver.sample(q, Q, vartype="BINARY")
+  print(result.first)  # states are 0/1 and result.vartype is BINARY
+  ```
+
+  Without `vartype` the variables are spins in {-1, +1} (Ising). A diagonal
+  entry `Q[i, i]` is a linear term in a QUBO and a constant in an Ising model;
+  the SDK folds it into the biases or the offset accordingly.
+
 **Submitting a problem defined in a file:**
 
 ```python
