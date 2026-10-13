@@ -666,14 +666,16 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
         """Create or retrieve a File instance.
 
-        Multiple input types (File, Path, str, dict, or tuple) are supported.
-        Path and str inpits are treated as file paths and so must contain
-        a valid extension unless a name is provided.
+        Multiple input types (File, Path, str, dict, tuple, or
+        BinaryQuadraticModel) are supported. Path and str inputs are treated
+        as file paths and so must contain a valid extension unless a name is
+        provided.
 
         By default, if a file with the same name already exists,
         it will not be overwritten unless `force` is set to True.
@@ -684,8 +686,16 @@ class File(BaseModel):
                 - A file path or string representing the file path.
                 - A dictionary conforming to the InstanceDict structure.
                 - A tuple conforming to InstanceTuple (biases, couplings).
+                - A dimod BinaryQuadraticModel.
             name (str | None): Optional file name to assign if creating a new file.
             problem (Problem | None): Optional Problem to associate with this file.
+            vartype (VartypeLike | None): Variable domain of a dict or tuple
+                instance, 'SPIN' (default) or 'BINARY'. A BinaryQuadraticModel
+                is converted to this domain when it differs from its own.
+                Ignored, with a warning, for File and path instances, whose
+                content already fixes the domain.
+            init_state (SampleSet | None): Optional initial states; its vartype
+                must match the model's.
             force (bool): If True, overwrite existing files with the same
                           name and re-upload content.
 
@@ -701,11 +711,19 @@ class File(BaseModel):
                 _logger.warning(
                     'Cannot pass initial state when using a File instance'
                 )
+            if vartype is not None:
+                _logger.warning(
+                    'Cannot pass vartype when using a File instance'
+                )
             return instance
         if isinstance(instance, (Path, str)):
             if init_state is not None:
                 _logger.warning(
                     'Cannot pass initial state when using instance path'
+                )
+            if vartype is not None:
+                _logger.warning(
+                    'Cannot pass vartype when using instance path'
                 )
             return cls.from_path(
                 path=instance,
@@ -718,6 +736,7 @@ class File(BaseModel):
                 bqm=instance,
                 name=name,
                 problem=problem,
+                vartype=vartype,
                 init_state=init_state,
                 force=force,
             )
@@ -726,6 +745,7 @@ class File(BaseModel):
                 data=instance,
                 name=name,
                 problem=problem,
+                vartype=vartype,
                 init_state=init_state,
                 force=force,
             )
@@ -734,13 +754,14 @@ class File(BaseModel):
                 data=instance,
                 name=name,
                 problem=problem,
+                vartype=vartype,
                 init_state=init_state,
                 force=force,
             )
 
         msg = (
             f"Unsupported instance type: {type(instance)}. "
-            "Expected a File, Path, str, dict, or tuple."
+            "Expected a File, Path, str, dict, tuple, or BinaryQuadraticModel."
         )
         raise TypeError(msg)
 

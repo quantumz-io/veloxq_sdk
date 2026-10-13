@@ -861,10 +861,14 @@ class TestFromConstructors:
 
         File.from_instance('some/path.h5')
         File.from_instance({'biases': [0.0], 'couplings': [[0.0]]})
-        File.from_instance(([0.0], [[0.0]]))
+        File.from_instance(([0.0], [[0.0]]), vartype='BINARY')
         File.from_instance(BinaryQuadraticModel.from_ising({0: 1.0}, {}))
         assert set(calls) == {'path', 'dict', 'tuple', 'bqm'}
         assert calls['path']['path'] == 'some/path.h5'
+        assert 'vartype' not in calls['path']
+        assert calls['dict']['vartype'] is None
+        assert calls['tuple']['vartype'] == 'BINARY'
+        assert calls['bqm']['vartype'] is None
 
     def test_from_instance_unsupported_type_raises(self):
         with pytest.raises(TypeError, match='Unsupported instance type'):
@@ -887,6 +891,22 @@ class TestFromConstructors:
             record.message
             for record in caplog.records
             if 'Cannot pass initial state' in record.message
+        ]
+        assert len(dropped) == 2
+
+    def test_from_instance_warns_when_vartype_is_dropped(
+        self, monkeypatch, caplog,
+    ):
+        monkeypatch.setattr(
+            File, 'from_path', classmethod(lambda cls, **kw: 'ignored'),
+        )
+        file = File.model_validate(file_json())
+        assert File.from_instance(file, vartype='BINARY') is file
+        File.from_instance('inst.h5', vartype='BINARY')
+        dropped = [
+            record.message
+            for record in caplog.records
+            if 'Cannot pass vartype' in record.message
         ]
         assert len(dropped) == 2
 
