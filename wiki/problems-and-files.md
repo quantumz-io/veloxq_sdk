@@ -186,11 +186,13 @@ couplings = {(0, 1): -1.0, (1, 2): 0.5}  # Variable index pairs mapped to coupli
 file_obj = File.from_instance((biases, couplings), name="sparse_ising.h5")
 ```
 
-Or using keyword arguments:
+Or using `File.from_dict`:
 
 ```python
-file_obj = File.from_instance(biases=biases, couplings=couplings, name="sparse_ising.h5")
+file_obj = File.from_dict({"biases": biases, "couplings": couplings}, name="sparse_ising.h5")
 ```
+
+The keyword form `biases=..., couplings=...` is accepted by `solver.sample`, not by `File.from_instance`. See [Submitting a Model to a Solver](solvers-and-backends.md#5-submitting-a-model-to-a-solver).
 
 This internally generates a temporary HDF5 file and uploads it.
 
@@ -232,10 +234,10 @@ couplings = {(0, 1): 1.0, (2, 1): -1.0}
 file_obj = File.from_instance((biases, couplings))
 ```
 
-Or using keyword arguments:
+Or using `File.from_dict`:
 
 ```python
-file_obj = File.from_instance(biases=biases, couplings=couplings)
+file_obj = File.from_dict({"biases": biases, "couplings": couplings})
 ```
 
 This internally generates a temporary HDF5 file and uploads it.
