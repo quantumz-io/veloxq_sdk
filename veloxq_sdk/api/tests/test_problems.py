@@ -19,6 +19,7 @@ import hashlib
 import io
 import json
 
+import dimod
 import h5py
 import httpx
 import numpy as np
@@ -116,13 +117,54 @@ class TestNormalizeIsingInputs:
             in_col = [r for r, cc in zip(rows, cols) if cc == c]
             assert in_col == sorted(in_col)
 
-    def test_diagonal_key_forms(self):
-        one_elem = File._normalize_ising_inputs({0: 0.0}, {(0,): 2.0})
-        pair_elem = File._normalize_ising_inputs({0: 0.0}, {(0, 0): 2.0})
+    def test_spin_diagonal_folds_into_offset(self):
+        # s_i * s_i == 1, so a diagonal coupling is a constant.
+        one_elem = File._normalize_ising_inputs({0: 0.5}, {(0,): 2.0}, offset=1.0)
+        pair_elem = File._normalize_ising_inputs({0: 0.5}, {(0, 0): 2.0}, offset=1.0)
         for normalized in (one_elem, pair_elem):
-            assert normalized['rows'].tolist() == [1]
-            assert normalized['cols'].tolist() == [1]
-            assert normalized['values'].tolist() == [2.0]
+            assert normalized['vartype'] is dimod.SPIN
+            assert normalized['values'].tolist() == []
+            assert normalized['biases'].tolist() == [0.5]
+            assert normalized['offset'] == 3.0
+
+    def test_binary_diagonal_folds_into_biases(self):
+        # x_i * x_i == x_i, so a diagonal coupling is a linear term.
+        one_elem = File._normalize_ising_inputs(
+            {0: 0.5}, {(0,): 2.0}, vartype='BINARY',
+        )
+        pair_elem = File._normalize_ising_inputs(
+            {0: 0.5}, {(0, 0): 2.0}, vartype=dimod.BINARY,
+        )
+        for normalized in (one_elem, pair_elem):
+            assert normalized['vartype'] is dimod.BINARY
+            assert normalized['values'].tolist() == []
+            assert normalized['biases'].tolist() == [2.5]
+            assert normalized['offset'] == 0.0
+
+    def test_full_qubo_matrix_matches_dimod(self):
+        # A full Q matrix with empty biases: the diagonal is the linear part.
+        Q = np.array([[-1.0, 2.0], [2.0, -3.0]])
+        normalized = File._normalize_ising_inputs({}, Q, vartype='BINARY')
+        bqm = BinaryQuadraticModel.from_qubo({(0, 0): -1.0, (0, 1): 2.0, (1, 1): -3.0})
+        assert normalized['biases'].tolist() == [bqm.linear[0], bqm.linear[1]]
+        entries = set(
+            zip(
+                normalized['rows'].tolist(),
+                normalized['cols'].tolist(),
+                normalized['values'].tolist(),
+            ),
+        )
+        assert entries == {(1, 2, 2.0), (2, 1, 2.0)}
+
+    def test_diagonal_entries_accumulate(self):
+        normalized = File._normalize_ising_inputs(
+            {}, {(0,): 1.0, (0, 0): 2.0}, vartype='BINARY',
+        )
+        assert normalized['biases'].tolist() == [3.0]
+
+    def test_invalid_vartype_raises(self):
+        with pytest.raises(TypeError):
+            File._normalize_ising_inputs({0: 1.0}, {}, vartype='QUBIT')
 
     def test_couplings_extend_biases_with_zeros(self):
         normalized = File._normalize_ising_inputs({}, {('x', 'y'): 1.0})
@@ -166,6 +208,43 @@ class TestNormalizeIsingInputs:
         normalized = File._normalize_ising_inputs({}, {('z',): 1.0})
         assert list(normalized['labels']) == ['z']
         assert normalized['biases'].tolist() == [0.0]
+
+    @pytest.mark.parametrize(
+        ('biases', 'couplings'),
+        [
+            ({'b': 1.0, 'a': 2.0}, {('c', 'a'): 1.0}),
+            ({'a': 1.0, 'b': 2.0, 'c': 0.5}, {('c', 'a'): 1.0, ('b', 'c'): 1.0}),
+            ([1.0, 2.0], {(3, 0): 1.0}),
+            ({}, {(2, 0): 1.0, (1, 0): 1.0}),
+        ],
+    )
+    @pytest.mark.parametrize('vartype', ['SPIN', 'BINARY'])
+    def test_variable_order_matches_dimod(self, biases, couplings, vartype):
+        normalized = File._normalize_ising_inputs(biases, couplings, vartype=vartype)
+        bqm = BinaryQuadraticModel(biases, couplings, vartype)
+        assert normalized['variables'] == list(bqm.variables)
+
+    @pytest.mark.parametrize('biases', [[], [1.0], [1.0, 0.0, 2.0, 0.5], {2: 1.0}])
+    @pytest.mark.parametrize('vartype', ['SPIN', 'BINARY'])
+    def test_matrix_variable_order_matches_dimod(self, biases, vartype):
+        # Variable 3 has no coupling and variable 1 couples only to itself.
+        Q = np.array([
+            [1.0, 0.0, -2.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-2.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ])
+        normalized = File._normalize_ising_inputs(biases, Q, vartype=vartype)
+        bqm = BinaryQuadraticModel(biases, Q, vartype)
+        assert normalized['variables'] == list(bqm.variables) == [0, 1, 2, 3]
+        assert normalized['size'] == 4
+
+    def test_bqm_views_keep_bqm_variable_order(self):
+        bqm = BinaryQuadraticModel('SPIN')
+        bqm.add_linear_from({'a': 1.0, 'b': 0.0, 'c': 0.0})
+        bqm.add_quadratic('c', 'a', 1.0)
+        normalized = File._normalize_ising_inputs(bqm.linear, bqm.quadratic)
+        assert normalized['variables'] == list(bqm.variables) == ['a', 'b', 'c']
 
     def test_select_shared_dtype_empty_defaults_to_float32(self):
         dtype = File._select_shared_dtype(
@@ -230,17 +309,16 @@ class TestWriteIsingHdf5:
             assert triplets == {(1, 2, 0.5), (2, 1, 0.5)}
 
     def test_dense_layout(self, tmp_path):
-        # 2x2 with both diagonals and the off-diagonal pair filled: no zeros.
-        path = self._write(
-            tmp_path,
-            {0: 0.0, 1: 0.0},
-            {(0, 0): 1.0, (1, 1): 2.0, (0, 1): 3.0},
-        )
+        # Fully coupled 7 variables: only the hollow diagonal is zero, which
+        # is below the sparsity threshold.
+        n = 7
+        couplings = np.ones((n, n)) - np.eye(n)
+        path = self._write(tmp_path, np.zeros(n), couplings)
         with h5py.File(path, 'r') as hdf:
             ising = hdf['Ising']
             assert ising.attrs['sparsity'] == 'dense'
             dense = ising['couplings'][:]
-            assert dense.tolist() == [[1.0, 3.0], [3.0, 2.0]]
+            assert dense.tolist() == couplings.tolist()
 
     def test_zero_offset_writes_no_dataset(self, tmp_path):
         path = self._write(tmp_path, {0: 1.0, 1: -1.0}, {(0, 1): 0.5})

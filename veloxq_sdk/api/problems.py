@@ -35,6 +35,7 @@ import httpx
 import numpy as np
 from dimod import BinaryQuadraticModel
 from dimod.sampleset import SampleSet
+from dimod.vartypes import BINARY, SPIN, Vartype, as_vartype
 from dimod.views.quadratic import Linear, Quadratic
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, TypeAdapter
@@ -79,6 +80,9 @@ CouplingsType = t.Union[
 
 InstanceTuple = t.Tuple[BiasesType, CouplingsType]
 
+VartypeLike = t.Union[Vartype, str]
+"""A dimod ``Vartype`` or its name: ``'SPIN'`` (Ising) or ``'BINARY'`` (QUBO)."""
+
 if t.TYPE_CHECKING:
     class _NormalizedIsingModel(t.TypedDict):
         biases: np.ndarray[tuple[int], np.dtype[np.number]]
@@ -89,6 +93,7 @@ if t.TYPE_CHECKING:
         idx_dtype: np.dtype[np.integer]
         size: int
         offset: float
+        vartype: Vartype
 
 
 SPARSE_THRESHOLD = 0.15
@@ -1211,9 +1216,18 @@ class File(BaseModel):
         biases: BiasesType,
         couplings: CouplingsType,
         *,
+        vartype: VartypeLike = SPIN,
         offset: float = 0.0,
     ) -> _NormalizedIsingModel:
-        """Normalize heterogeneous Ising inputs into arrays for HDF5 serialization."""
+        """Normalize heterogeneous model inputs into arrays for HDF5 serialization.
+
+        The couplings come out hollow and symmetric, as the solver expects.
+        A diagonal coupling ``(i, i)`` is folded the way dimod folds it: into
+        the offset for SPIN (``s_i * s_i == 1``) and into the bias of ``i``
+        for BINARY (``x_i * x_i == x_i``).
+        """
+        vartype = as_vartype(vartype)
+        offset = float(offset)
         if isinstance(biases, (Linear, dict)):
             biases_dict = dict(biases)
         elif isinstance(biases, (list, np.ndarray)):
@@ -1246,28 +1260,39 @@ class File(BaseModel):
             )
             raise TypeError(msg)
 
-        couplings_dict: dict[tuple[VariableType, ...], CouplingType] = {}
+        # Same variable order as BinaryQuadraticModel(biases, couplings), so
+        # results can be relabelled by position.
+        if isinstance(couplings, (list, np.ndarray)):
+            seen = dict.fromkeys(range(len(coupling_array)), 0)
+        elif isinstance(biases, Linear):
+            seen = {}
+        else:
+            seen = dict.fromkeys((i for key, _ in coupling_items for i in key), 0)
+        biases_dict = {**seen, **biases_dict}
+
+        couplings_dict: dict[tuple[VariableType, VariableType], CouplingType] = {}
         for key, val in coupling_items:
-            # Ensure biases exist for all variables in couplings
-            if len(key) == 1:
-                canonical_key = key
-                if key[0] not in biases_dict:
-                    biases_dict[key[0]] = 0
-            elif len(key) == 2:
-                # Canonical ordering: min index first
-                canonical_key = (min(key), max(key)) if key[0] != key[1] else (key[0],)
-                for i in key:
-                    if i not in biases_dict:
-                        biases_dict[i] = 0
-            else:
+            if len(key) not in (1, 2):
                 msg = f"Coupling key must have 1 or 2 elements, got {len(key)}"
                 raise ValueError(msg)
+            # Ensure biases exist for all variables in couplings
+            for i in key:
+                biases_dict.setdefault(i, 0)
 
+            if len(key) == 1 or key[0] == key[1]:
+                if vartype is BINARY:
+                    biases_dict[key[0]] += val
+                else:
+                    offset += float(val)
+                continue
+
+            # Canonical ordering: min index first
+            canonical_key = (min(key), max(key))
             # Check for conflicts only when key already exists
             if canonical_key in couplings_dict:
                 existing = couplings_dict[canonical_key]
                 if not np.isclose(existing, val):
-                    u, v = canonical_key if len(canonical_key) == 2 else (canonical_key[0], canonical_key[0])
+                    u, v = canonical_key
                     msg = f"Symmetric couplings contain mismatched values for pair ({u}, {v}): {existing} vs {val}"
                     raise ValueError(msg)
             else:
@@ -1281,11 +1306,8 @@ class File(BaseModel):
         label_to_idx = {label: idx for idx, label in enumerate(biases_dict.keys())}
         size = len(label_to_idx)
 
-        # Estimate size: diagonal + off-diagonal elements (symmetrized)
-        num_couplings = len(couplings_dict)
-        # Count off-diagonal elements for proper pre-allocation
-        num_off_diag = sum(1 for key in couplings_dict.keys() if len(key) == 2)
-        total_entries = num_couplings + num_off_diag  # diagonal + 2x off-diagonal
+        # Every coupling is off-diagonal and stored in both triangles.
+        total_entries = 2 * len(couplings_dict)
 
         idx_dtype: np.dtype[np.integer] = np.min_scalar_type(
             max(size, total_entries + 1),
@@ -1295,34 +1317,17 @@ class File(BaseModel):
         cols_list = np.empty(total_entries, dtype=idx_dtype)
         values_list = np.empty(total_entries, dtype=float)
 
-        idx = 0
-        for key, val in couplings_dict.items():
-            if len(key) == 1:
-                u = key[0]
-                i = label_to_idx[u]
-                rows_list[idx] = i + 1
-                cols_list[idx] = i + 1
-                values_list[idx] = val
-                idx += 1
-            else:  # len(key) == 2
-                u, v = key
-                i = label_to_idx[u]
-                j = label_to_idx[v]
-                # Upper triangle entry
-                rows_list[idx] = i + 1
-                cols_list[idx] = j + 1
-                values_list[idx] = val
-                idx += 1
-                # Lower triangle entry (symmetric)
-                rows_list[idx] = j + 1
-                cols_list[idx] = i + 1
-                values_list[idx] = val
-                idx += 1
-
-        # Trim to actual size
-        rows_list = rows_list[:idx]
-        cols_list = cols_list[:idx]
-        values_list = values_list[:idx]
+        for idx, ((u, v), val) in enumerate(couplings_dict.items()):
+            i = label_to_idx[u]
+            j = label_to_idx[v]
+            # Upper triangle entry
+            rows_list[2 * idx] = i + 1
+            cols_list[2 * idx] = j + 1
+            values_list[2 * idx] = val
+            # Lower triangle entry (symmetric)
+            rows_list[2 * idx + 1] = j + 1
+            cols_list[2 * idx + 1] = i + 1
+            values_list[2 * idx + 1] = val
 
         # Sort by column-major order
         order = np.lexsort((rows_list, cols_list))
@@ -1359,4 +1364,5 @@ class File(BaseModel):
             "idx_dtype": idx_dtype,
             "size": size,
             "offset": offset,
+            "vartype": vartype,
         }
