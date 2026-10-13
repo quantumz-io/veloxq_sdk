@@ -857,24 +857,105 @@ class File(BaseModel):
         offset: float = 0.0,
         upload_callback: t.Callable[[int], None] = lambda _: None,
     ) -> File:
-        """Create a File instance from Ising model.
+        """Create a File instance from an Ising model.
 
-        A temporary HDF5 file is created to store the Ising model data.
+        The energy is ``sum_i h_i s_i + sum_{i<j} J_ij s_i s_j + offset`` with
+        ``s_i`` in {-1, +1}. A coupling ``(i, i)`` equals a constant and is
+        folded into the offset.
+
+        A temporary HDF5 file is created to store the model data.
         The file is then uploaded to the VeloxQ platform, and a File object is returned.
 
         Args:
-            biases (BiasesType): The bias terms in the Ising model.
-            coupling (CouplingType): The coupling terms in the Ising model.
+            biases (BiasesType): The linear terms ``h``.
+            couplings (CouplingsType): The quadratic terms ``J``.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
+            init_state (SampleSet | None): Optional initial states; must be SPIN.
             force (bool): If True, overwrite if a file with the same name exists.
-            offset (float): Energy offset carried in the Ising model. Defaults to 0.0.
+            offset (float): Constant energy term. Defaults to 0.0.
             upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
 
         Returns:
             File: The resulting File object.
 
         """
+        return cls._from_quadratic(
+            biases,
+            couplings,
+            SPIN,
+            name=name,
+            problem=problem,
+            init_state=init_state,
+            force=force,
+            offset=offset,
+            upload_callback=upload_callback,
+        )
+
+    @classmethod
+    def from_qubo(
+        cls,
+        biases: BiasesType,
+        couplings: CouplingsType,
+        name: str | None = None,
+        problem: Problem | None = None,
+        *,
+        init_state: SampleSet | None = None,
+        force: bool = False,
+        offset: float = 0.0,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
+    ) -> File:
+        """Create a File instance from a QUBO model.
+
+        The energy is ``sum_i q_i x_i + sum_{i<j} Q_ij x_i x_j + offset`` with
+        ``x_i`` in {0, 1}. A coupling ``(i, i)`` is a linear term, since
+        ``x_i * x_i == x_i``, and is folded into the biases. A full QUBO matrix
+        can therefore be passed as ``couplings`` with empty ``biases``.
+
+        A temporary HDF5 file is created to store the model data.
+        The file is then uploaded to the VeloxQ platform, and a File object is returned.
+
+        Args:
+            biases (BiasesType): The linear terms ``q``.
+            couplings (CouplingsType): The quadratic terms ``Q``.
+            name (str | None): The file name. By default a hash-based name is generated.
+            problem (Problem | None): Optional Problem to associate with.
+            init_state (SampleSet | None): Optional initial states; must be BINARY.
+            force (bool): If True, overwrite if a file with the same name exists.
+            offset (float): Constant energy term. Defaults to 0.0.
+            upload_callback (t.Callable[[int], None]): A callback function to report upload progress.
+
+        Returns:
+            File: The resulting File object.
+
+        """
+        return cls._from_quadratic(
+            biases,
+            couplings,
+            BINARY,
+            name=name,
+            problem=problem,
+            init_state=init_state,
+            force=force,
+            offset=offset,
+            upload_callback=upload_callback,
+        )
+
+    @classmethod
+    def _from_quadratic(
+        cls,
+        biases: BiasesType,
+        couplings: CouplingsType,
+        vartype: VartypeLike,
+        name: str | None = None,
+        problem: Problem | None = None,
+        *,
+        init_state: SampleSet | None = None,
+        force: bool = False,
+        offset: float = 0.0,
+        upload_callback: t.Callable[[int], None] = lambda _: None,
+    ) -> File:
+        """Serialize a binary quadratic model to HDF5 and upload it."""
         if name:
             if (ext_idx := name.find(".")) != -1:
                 name = name[:ext_idx]
@@ -887,7 +968,14 @@ class File(BaseModel):
             with NamedTemporaryFile(delete=False) as temp_file:
                 temp_file_path = Path(temp_file.name)
 
-                cls._write_ising_hdf5(temp_file, biases, couplings, init_state=init_state, offset=offset)
+                cls._write_ising_hdf5(
+                    temp_file,
+                    biases,
+                    couplings,
+                    vartype=vartype,
+                    init_state=init_state,
+                    offset=offset,
+                )
                 temp_file.flush()
                 temp_file_size = temp_file.seek(0, os.SEEK_END)
                 temp_file.seek(0)

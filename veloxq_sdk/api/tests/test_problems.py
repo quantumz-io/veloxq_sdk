@@ -890,6 +890,24 @@ class TestFromConstructors:
         ]
         assert len(dropped) == 2
 
+    @pytest.fixture
+    def quadratic_probe(self, monkeypatch):
+        seen = []
+
+        def fake(cls, *args, **kw):
+            seen.append((args, kw))
+
+        monkeypatch.setattr(File, '_from_quadratic', classmethod(fake))
+        return seen
+
+    def test_from_ising_and_from_qubo_fix_the_vartype(self, quadratic_probe):
+        File.from_ising([1.0], [[0.0]], offset=0.5)
+        File.from_qubo([1.0], [[0.0]], offset=0.5)
+        (ising_args, ising_kw), (qubo_args, qubo_kw) = quadratic_probe
+        assert ising_args == ([1.0], [[0.0]], dimod.SPIN)
+        assert qubo_args == ([1.0], [[0.0]], dimod.BINARY)
+        assert ising_kw['offset'] == qubo_kw['offset'] == 0.5
+
     def test_from_dict_and_tuple_forward_to_from_ising(self, monkeypatch):
         seen = []
         monkeypatch.setattr(
@@ -1050,12 +1068,13 @@ class TestFromConstructors:
             json=file_json(status='completed'),
         )
 
-        file = File.from_ising({'a': 1.0, 'b': -1.0}, {('a', 'b'): 0.5})
+        file = File.from_qubo({'a': 1.0, 'b': -1.0}, {('a', 'b'): 0.5})
         assert file.status == 'completed'
 
         uploaded = puts[0]['content']
         with h5py.File(io.BytesIO(uploaded), 'r') as hdf:
             assert hdf['Ising']['L'][()] == 2
+            assert hdf['Ising'].attrs['var_type'] == 'BINARY'
         # the generated name is the SHA-256 of the serialized HDF5 payload
         direct_body = json.loads(mock_api.calls('POST', '/files/direct')[0].content)
         assert direct_body['file_name'] == (
