@@ -67,7 +67,7 @@ jobs = Job.get_jobs(
 
 #### 2.3.1 Filtering by Status or Creation Time
 
-- `status` can be `CREATED`, `PENDING`, `RUNNING`, `COMPLETED`, or `FAILED`.
+- `status` can be `CREATED`, `PENDING`, `RUNNING`, `CANCELED`, `COMPLETED`, or `FAILED`.
 - `created_at` can be `TODAY`, `YESTERDAY`, `LAST_WEEK`, `LAST_MONTH`, `LAST_3_MONTHS`, `LAST_YEAR`, or `ALL`.
 
 Returns up to `limit` jobs; default is 1000.
@@ -96,3 +96,18 @@ logs = job.get_job_logs(
 for entry in logs:
     print(f"[{entry.timestamp}] {entry.category}: {entry.message}")
 ```
+
+### 2.6 Canceling a Job
+
+`job.cancel()` request a  job to be canceled. The call returns as soon as the request is recorded. The job then ends through its normal updates, with status `CANCELED` unless the solver had already finished. A job canceled while the solver was running keeps the samples found up to that point, so `job.result_available` is `True` and `job.result` holds them.
+
+```python
+job = solver.submit(file_obj)
+job.cancel()
+job.wait_for_completion(refresh=True)
+print(job.status)  # 'canceled'
+if job.result_available:
+    print(job.result.first)
+```
+
+Canceling a job that already finished raises `httpx.HTTPStatusError` with status code 409.

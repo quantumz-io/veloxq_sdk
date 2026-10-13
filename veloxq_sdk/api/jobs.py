@@ -481,6 +481,21 @@ class Job(BaseModel):
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
 
+    def cancel(self) -> None:
+        """Request a job to be canceled.
+
+        The job ends through its normal updates, as ``canceled`` unless the
+        solver had already finished. Use ``wait_for_completion`` to observe
+        the final status.
+
+        Raises:
+            httpx.HTTPStatusError: The platform rejected the request, for
+                example because the job already finished.
+
+        """
+        response = self.http.post(f'jobs/{self.id}/cancel')
+        response.raise_for_status()
+
     def refresh(self) -> None:
         """Refresh the job data from the API."""
         self._update_from_response(self.http.get(f'jobs/{self.id}'))

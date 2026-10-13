@@ -264,6 +264,16 @@ class TestJobEndpoints:
         job.refresh()
         assert job.status == 'completed'
 
+    def test_cancel_posts_without_refreshing(self, mock_api):
+        mock_api.add(
+            'POST', '/jobs/j1/cancel', json={'message': 'Job cancel requested'},
+        )
+        job = make_job()
+        job.cancel()
+        assert mock_api.calls('POST', '/jobs/j1/cancel')
+        assert not mock_api.calls('GET', '/jobs/j1')
+        assert job.status == 'running'
+
     def test_refresh_id_mismatch_raises(self, mock_api):
         mock_api.add('GET', '/jobs/j1', json=job_json(job_id='other'))
         with pytest.raises(ValueError, match='ID mismatch'):

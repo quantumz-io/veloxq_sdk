@@ -143,6 +143,32 @@ class TestResultMetadata:
         assert metadata.items is not None
 
 
+class TestCancel:
+    @pytest.mark.xfail(
+        reason='the live API has not deployed POST jobs/{id}/cancel yet',
+        strict=True,
+        raises=httpx.HTTPStatusError,
+    )
+    def test_cancel_ends_the_job_as_canceled(self):
+        # Enough work to outlast the cancel round trip, small enough to
+        # finish within SOLVE_TIMEOUT if the cancel is not honored.
+        rng = np.random.default_rng(0)
+        n = 100
+        couplings = np.triu(rng.standard_normal((n, n)), 1)
+        couplings = couplings + couplings.T
+        file = File.from_ising(np.zeros(n), couplings, name=unique_name('h5'))
+        try:
+            solver = VeloxQSolver(
+                parameters=VeloxQParameters(num_rep=4096, num_steps=50_000),
+            )
+            job = solver.submit(file)
+            job.cancel()
+            job.wait_for_completion(timeout=SOLVE_TIMEOUT, refresh=True)
+            assert job.status == JobStatus.CANCELED.value
+        finally:
+            delete_and_assert_gone(file)
+
+
 class TestSolveEndToEnd:
     def test_two_spin_antiferromagnet(self, tmp_path):
         # h = 0, J_01 = 1: the ground states are the two anti-aligned
