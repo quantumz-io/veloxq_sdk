@@ -1025,6 +1025,8 @@ class File(BaseModel):
         Group `Ising` with attributes `sparsity`, `type`, `var_type`, and datasets
         `biases`, `L`, and a sparse CSC-encoded `couplings` subgroup (I, J, V, dims)
         if sparse, or a dense `couplings` dataset if dense.
+        `offset` is a scalar dataset, written only when non-zero: the solver
+        reads an absent dataset as zero and ignores attributes.
         Labels are stored as strings for round-tripping non-integer variables.
         Sparse indices are stored 1-based to match the solver reader.
         """
@@ -1038,7 +1040,8 @@ class File(BaseModel):
             group = hdf.require_group("Ising")
             group.attrs["type"] = "BinaryQuadraticModel"
             group.attrs["var_type"] = "SPIN"
-            group.attrs["offset"] = float(normalized["offset"])
+            if normalized["offset"] != 0.0:
+                group.create_dataset("offset", data=float(normalized["offset"]))
 
             # Use chunking for better I/O performance on large datasets
             bias_data = normalized["biases"]

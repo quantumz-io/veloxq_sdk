@@ -207,7 +207,10 @@ class TestWriteIsingHdf5:
             assert ising.attrs['sparsity'] == 'sparse'
             assert ising.attrs['type'] == 'BinaryQuadraticModel'
             assert ising.attrs['var_type'] == 'SPIN'
-            assert ising.attrs['offset'] == 1.5
+            # the solver reads the offset from a dataset, not an attribute
+            assert 'offset' not in ising.attrs
+            assert ising['offset'][()] == 1.5
+            assert ising['offset'].shape == ()
             assert ising['L'][()] == 2
             assert ising['biases'][:].tolist() == [1.0, -1.0]
             assert [
@@ -238,6 +241,12 @@ class TestWriteIsingHdf5:
             assert ising.attrs['sparsity'] == 'dense'
             dense = ising['couplings'][:]
             assert dense.tolist() == [[1.0, 3.0], [3.0, 2.0]]
+
+    def test_zero_offset_writes_no_dataset(self, tmp_path):
+        path = self._write(tmp_path, {0: 1.0, 1: -1.0}, {(0, 1): 0.5})
+        with h5py.File(path, 'r') as hdf:
+            assert 'offset' not in hdf['Ising']
+            assert 'offset' not in hdf['Ising'].attrs
 
     def test_init_state_spectrum(self, tmp_path):
         states = np.array([[1, -1], [-1, 1]], dtype=np.int8)
