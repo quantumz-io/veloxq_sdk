@@ -1164,6 +1164,8 @@ class File(BaseModel):
                     msg = "Initial SampleSet needs to have consistent size and fit the instance."
                     raise TypeError(msg)
                 spectrum = hdf.require_group("Spectrum")
+                spectrum.attrs["type"] = "Spectrum"
+                spectrum.attrs["var_type"] = var_type_name
                 spectrum.create_dataset("L", data=size, dtype=idx_dtype)
                 spectrum.create_dataset("num_rep", data=np.array(num_rep), dtype=np.int64)
 

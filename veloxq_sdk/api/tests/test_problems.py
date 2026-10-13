@@ -354,10 +354,30 @@ class TestWriteIsingHdf5:
         )
         with h5py.File(path, 'r') as hdf:
             spectrum = hdf['Spectrum']
+            # without these attributes the solver reads a SPIN spectrum
+            assert spectrum.attrs['type'] == 'Spectrum'
+            assert spectrum.attrs['var_type'] == 'SPIN'
             assert spectrum['L'][()] == 2
             assert spectrum['num_rep'][()] == 2
             assert spectrum['energies'].dtype == np.float32
             assert spectrum['states'].dtype == np.int8
+            assert spectrum['states'][:].tolist() == states.tolist()
+
+    def test_binary_init_state_spectrum(self, tmp_path):
+        states = np.array([[1, 0], [0, 1]], dtype=np.int8)
+        init_state = SampleSet.from_samples(
+            states, energy=[0.0, 0.0], vartype='BINARY',
+        )
+        path = self._write(
+            tmp_path,
+            {0: 0.0, 1: 0.0},
+            {(0, 1): 1.0},
+            vartype='BINARY',
+            init_state=init_state,
+        )
+        with h5py.File(path, 'r') as hdf:
+            spectrum = hdf['Spectrum']
+            assert spectrum.attrs['var_type'] == 'BINARY'
             assert spectrum['states'][:].tolist() == states.tolist()
 
     def test_init_state_vartype_mismatch_raises(self, tmp_path):
