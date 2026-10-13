@@ -1022,29 +1022,44 @@ class File(BaseModel):
         biases: BiasesType,
         couplings: CouplingsType,
         *,
+        vartype: VartypeLike = SPIN,
         init_state: SampleSet | None = None,
         offset: float = 0.0,
     ) -> None:
-        """Serialize Ising data into the solver-compatible HDF5 layout.
+        """Serialize a binary quadratic model into the solver's HDF5 layout.
 
         Group `Ising` with attributes `sparsity`, `type`, `var_type`, and datasets
         `biases`, `L`, and a sparse CSC-encoded `couplings` subgroup (I, J, V, dims)
-        if sparse, or a dense `couplings` dataset if dense.
+        if sparse, or a dense `couplings` dataset if dense. The group name is a
+        label only; `var_type` carries the variable domain.
         `offset` is a scalar dataset, written only when non-zero: the solver
         reads an absent dataset as zero and ignores attributes.
         Labels are stored as strings for round-tripping non-integer variables.
         Sparse indices are stored 1-based to match the solver reader.
+        An initial state is stored as a `Spectrum` group; without the `type`
+        and `var_type` attributes the solver would read it as a SPIN spectrum.
         """
-        normalized = File._normalize_ising_inputs(biases, couplings, offset=offset)
+        normalized = File._normalize_ising_inputs(
+            biases, couplings, vartype=vartype, offset=offset,
+        )
 
         size = normalized["size"]
         idx_dtype = normalized["idx_dtype"]
+        var_type_name = normalized["vartype"].name
+
+        if init_state is not None and init_state.vartype is not normalized["vartype"]:
+            msg = (
+                f"Initial SampleSet vartype {init_state.vartype.name} does not "
+                f"match the model vartype {var_type_name}. Convert it with "
+                f"init_state.change_vartype('{var_type_name}')."
+            )
+            raise ValueError(msg)
 
         # Use libver='latest' for better performance with large files
         with h5py.File(file, "w", libver='latest') as hdf:
             group = hdf.require_group("Ising")
             group.attrs["type"] = "BinaryQuadraticModel"
-            group.attrs["var_type"] = "SPIN"
+            group.attrs["var_type"] = var_type_name
             if normalized["offset"] != 0.0:
                 group.create_dataset("offset", data=float(normalized["offset"]))
 
@@ -1176,7 +1191,7 @@ class File(BaseModel):
                 spectrum.create_dataset(
                     "states",
                     data=states,
-                    dtype=np.int8,  # States are typically -1/+1 or 0/1
+                    dtype=np.int8,  # -1/+1 for SPIN, 0/1 for BINARY
                     chunks=states_chunks,
                 )
 

@@ -326,6 +326,21 @@ class TestWriteIsingHdf5:
             assert 'offset' not in hdf['Ising']
             assert 'offset' not in hdf['Ising'].attrs
 
+    def test_binary_layout(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            {0: 1.0, 1: -1.0},
+            {(0, 1): 0.5},
+            vartype='BINARY',
+            offset=-2.0,
+        )
+        with h5py.File(path, 'r') as hdf:
+            ising = hdf['Ising']
+            assert ising.attrs['var_type'] == 'BINARY'
+            assert ising.attrs['type'] == 'BinaryQuadraticModel'
+            assert ising['offset'][()] == -2.0
+            assert 'Spectrum' not in hdf
+
     def test_init_state_spectrum(self, tmp_path):
         states = np.array([[1, -1], [-1, 1]], dtype=np.int8)
         init_state = SampleSet.from_samples(
@@ -344,6 +359,19 @@ class TestWriteIsingHdf5:
             assert spectrum['energies'].dtype == np.float32
             assert spectrum['states'].dtype == np.int8
             assert spectrum['states'][:].tolist() == states.tolist()
+
+    def test_init_state_vartype_mismatch_raises(self, tmp_path):
+        init_state = SampleSet.from_samples(
+            np.array([[1, -1]], dtype=np.int8), energy=[0.0], vartype='SPIN',
+        )
+        with pytest.raises(ValueError, match='does not match the model vartype BINARY'):
+            self._write(
+                tmp_path,
+                {0: 0.0, 1: 0.0},
+                {(0, 1): 1.0},
+                vartype='BINARY',
+                init_state=init_state,
+            )
 
     def test_large_sparse_instance_is_chunked(self, tmp_path):
         # >1000 variables and triplets: biases, labels, and I/J/V get chunks.
