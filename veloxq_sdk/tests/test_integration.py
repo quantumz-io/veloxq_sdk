@@ -28,6 +28,7 @@ import io
 import os
 import uuid
 
+import dimod
 import httpx
 import numpy as np
 import pytest
@@ -175,3 +176,51 @@ class TestSolveEndToEnd:
             assert result_path.stat().st_size > 0
         finally:
             delete_and_assert_gone(file)
+
+    def _solve(self, bqm: dimod.BinaryQuadraticModel):
+        file = File.from_bqm(bqm, name=unique_name('h5'))
+        try:
+            solver = VeloxQSolver(
+                parameters=VeloxQParameters(num_rep=128, num_steps=500),
+            )
+            job = solver.submit(file)
+            job.wait_for_completion(timeout=SOLVE_TIMEOUT, refresh=True)
+            assert job.status == JobStatus.COMPLETED.value
+            return job.result
+        finally:
+            delete_and_assert_gone(file)
+
+    def test_qubo_is_solved_in_the_binary_domain(self):
+        # Minimizing x0 + x1 + x2 - 2 x0 x1 - 2 x1 x2: the unique optimum is
+        # x = (1, 1, 1) with energy -1. The states come back as 0/1 and the
+        # energies follow the QUBO convention, not a spin conversion of it.
+        bqm = dimod.BinaryQuadraticModel.from_qubo(
+            {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0, (0, 1): -2.0, (1, 2): -2.0},
+        )
+        result = self._solve(bqm)
+
+        assert result.vartype is dimod.BINARY
+        assert set(np.unique(result.sample)) <= {0, 1}
+        assert result.first.sample == {0: 1, 1: 1, 2: 1}
+        np.testing.assert_allclose(
+            result.energy, bqm.energies(result.sample), atol=1e-5,
+        )
+
+    @pytest.mark.xfail(
+        reason='the deployed solver predates offset support and reports '
+               'energies without the constant term',
+        strict=False,
+        raises=AssertionError,
+    )
+    def test_energy_offset_is_applied(self):
+        bqm = dimod.BinaryQuadraticModel.from_qubo(
+            {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0, (0, 1): -2.0, (1, 2): -2.0},
+            offset=0.5,
+        )
+        result = self._solve(bqm)
+
+        assert result.first.sample == {0: 1, 1: 1, 2: 1}
+        assert result.first.energy == pytest.approx(-0.5, abs=1e-5)
+        np.testing.assert_allclose(
+            result.energy, bqm.energies(result.sample), atol=1e-5,
+        )
