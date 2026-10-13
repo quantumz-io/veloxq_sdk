@@ -17,6 +17,7 @@ import io
 import json
 import time
 
+import dimod
 import h5py
 import numpy as np
 import pytest
@@ -64,9 +65,13 @@ def make_job(status: str = 'running', **overrides) -> Job:
     return Job.model_validate(job_json(status=status, **overrides))
 
 
-def write_result_h5(path, *, states, energies, metadata, labels=None, extra=None):
+def write_result_h5(
+    path, *, states, energies, metadata, labels=None, extra=None, attrs=None,
+):
     with h5py.File(path, 'w') as hdf:
         spectrum = hdf.require_group('Spectrum')
+        for key, value in (attrs or {}).items():
+            spectrum.attrs[key] = value
         spectrum.create_dataset('states', data=np.asarray(states, dtype=np.int8))
         spectrum.create_dataset('energies', data=np.asarray(energies))
         spectrum.create_dataset('metadata', data=json.dumps(metadata))
@@ -371,6 +376,35 @@ class TestVeloxSampleSet:
         # duplicate states are aggregated
         assert len(sampleset) == 2
         assert sorted(sampleset.record.num_occurrences.tolist()) == [1, 2]
+
+    def test_vartype_defaults_to_spin_without_attribute(self, tmp_path):
+        path = tmp_path / 'result.h5'
+        write_result_h5(path, states=[[1, -1]], energies=[-1.0], metadata={})
+        with h5py.File(path, 'r') as hdf:
+            sampleset = VeloxSampleSet.from_result(hdf)
+        assert sampleset.vartype is dimod.SPIN
+
+    @pytest.mark.parametrize(
+        'var_type',
+        [
+            'BINARY',
+            # the solver writes fixed-length strings, read back as bytes
+            np.bytes_(b'BINARY'),
+        ],
+    )
+    def test_vartype_follows_spectrum_attribute(self, tmp_path, var_type):
+        path = tmp_path / 'result.h5'
+        write_result_h5(
+            path,
+            states=[[1, 0], [0, 1]],
+            energies=[-1.0, -2.0],
+            metadata={},
+            attrs={'type': np.bytes_(b'Spectrum'), 'var_type': var_type},
+        )
+        with h5py.File(path, 'r') as hdf:
+            sampleset = VeloxSampleSet.from_result(hdf)
+        assert sampleset.vartype is dimod.BINARY
+        assert sampleset.first.sample == {0: 0, 1: 1}
 
     def test_energy_and_sample_properties(self, tmp_path):
         path = tmp_path / 'result.h5'

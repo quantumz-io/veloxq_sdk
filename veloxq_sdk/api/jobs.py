@@ -35,7 +35,7 @@ import h5py
 import numpy as np
 from dateutil.parser import isoparse
 from dimod.sampleset import SampleSet
-from dimod.vartypes import SPIN
+from dimod.vartypes import as_vartype
 from pydantic import BeforeValidator, Field
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
@@ -584,6 +584,9 @@ class VeloxSampleSet(SampleSet):
     def from_result(cls, file: h5py.File) -> VeloxSampleSet:
         """Create a VeloxSampleSet from an HDF5 file.
 
+        The vartype comes from the `var_type` attribute of the `Spectrum`
+        group. A spectrum without that attribute is SPIN.
+
         Args:
             file (h5py.File): The HDF5 file containing the samples.
 
@@ -591,20 +594,27 @@ class VeloxSampleSet(SampleSet):
             VeloxSampleSet: A SampleSet object created from the HDF5 file.
 
         """
-        samples = file['Spectrum/states']
-        energies = file['Spectrum/energies']
+        spectrum = file['Spectrum']
+        samples = spectrum['states']
+        energies = spectrum['energies']
 
-        info = json.loads(file['Spectrum']['metadata'][()])
+        info = json.loads(spectrum['metadata'][()])
 
-        labels = file.get('Spectrum/labels', None)
+        labels = spectrum.get('labels', None)
 
-        for key in file['Spectrum'].keys() - {'states', 'energies', 'metadata', 'labels'}:
-            info[key] = file['Spectrum'][key][()]
+        for key in spectrum.keys() - {'states', 'energies', 'metadata', 'labels'}:
+            info[key] = spectrum[key][()]
+
+        # The solver writes fixed-length string attributes, which h5py
+        # returns as bytes.
+        var_type = spectrum.attrs.get('var_type', 'SPIN')
+        if isinstance(var_type, bytes):
+            var_type = var_type.decode()
 
         sampleset = cls.from_samples(
             samples,
             energy=energies,
-            vartype=SPIN,
+            vartype=as_vartype(var_type),
             info=info,
             aggregate_samples=True,
         )
