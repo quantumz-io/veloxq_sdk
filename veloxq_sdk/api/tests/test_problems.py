@@ -900,6 +900,33 @@ class TestFromConstructors:
         monkeypatch.setattr(File, '_from_quadratic', classmethod(fake))
         return seen
 
+    def test_from_dict_and_tuple_default_to_spin(self, quadratic_probe):
+        File.from_dict({'biases': [1.0], 'couplings': [[0.0]]})
+        File.from_tuple(([2.0], [[0.0]]))
+        (_, dict_kw), (_, tuple_kw) = quadratic_probe
+        assert dict_kw['biases'] == [1.0]
+        assert dict_kw['vartype'] is dimod.SPIN
+        assert tuple_kw['biases'] == [2.0]
+        assert tuple_kw['vartype'] is dimod.SPIN
+
+    def test_from_dict_and_tuple_forward_vartype(self, quadratic_probe):
+        File.from_dict(
+            {'biases': [1.0], 'couplings': [[0.0]], 'vartype': 'BINARY'},
+        )
+        File.from_dict({'biases': [1.0], 'couplings': [[0.0]]}, vartype='BINARY')
+        File.from_tuple(([2.0], [[0.0]]), vartype=dimod.BINARY)
+        assert [kw['vartype'] for _, kw in quadratic_probe] == [
+            dimod.BINARY, 'BINARY', dimod.BINARY,
+        ]
+
+    def test_from_dict_vartype_conflict_raises(self, quadratic_probe):
+        with pytest.raises(ValueError, match='vartype=SPIN conflicts'):
+            File.from_dict(
+                {'biases': [1.0], 'couplings': [[0.0]], 'vartype': 'BINARY'},
+                vartype='SPIN',
+            )
+        assert quadratic_probe == []
+
     def test_from_ising_and_from_qubo_fix_the_vartype(self, quadratic_probe):
         File.from_ising([1.0], [[0.0]], offset=0.5)
         File.from_qubo([1.0], [[0.0]], offset=0.5)
@@ -908,30 +935,24 @@ class TestFromConstructors:
         assert qubo_args == ([1.0], [[0.0]], dimod.BINARY)
         assert ising_kw['offset'] == qubo_kw['offset'] == 0.5
 
-    def test_from_dict_and_tuple_forward_to_from_ising(self, monkeypatch):
-        seen = []
-        monkeypatch.setattr(
-            File,
-            'from_ising',
-            classmethod(lambda cls, **kw: seen.append(kw)),
-        )
-        File.from_dict({'biases': [1.0], 'couplings': [[0.0]]})
-        File.from_tuple(([2.0], [[0.0]]))
-        assert seen[0]['biases'] == [1.0]
-        assert seen[1]['biases'] == [2.0]
-
-    def test_from_bqm_converts_to_spin_with_offset(self, monkeypatch):
-        seen = {}
-        monkeypatch.setattr(
-            File,
-            'from_ising',
-            classmethod(lambda cls, **kw: seen.update(kw)),
-        )
-        bqm = BinaryQuadraticModel.from_qubo({(0, 0): -1.0, (0, 1): 2.0})
+    def test_from_bqm_keeps_vartype_and_offset(self, quadratic_probe):
+        bqm = BinaryQuadraticModel.from_qubo({(0, 0): -1.0, (0, 1): 2.0}, offset=0.75)
         File.from_bqm(bqm)
+        (_, kw), = quadratic_probe
+        assert kw['vartype'] is dimod.BINARY
+        assert kw['offset'] == 0.75
+        assert dict(kw['biases']) == dict(bqm.linear)
+        assert dict(kw['couplings']) == dict(bqm.quadratic)
+
+    def test_from_bqm_converts_to_requested_vartype(self, quadratic_probe):
+        bqm = BinaryQuadraticModel.from_qubo({(0, 0): -1.0, (0, 1): 2.0})
+        File.from_bqm(bqm, vartype='SPIN')
+        (_, kw), = quadratic_probe
         spin = bqm.spin
-        assert seen['offset'] == spin.offset
-        assert dict(seen['biases']) == dict(spin.linear)
+        assert kw['vartype'] is dimod.SPIN
+        assert kw['offset'] == spin.offset
+        assert dict(kw['biases']) == dict(spin.linear)
+        assert dict(kw['couplings']) == dict(spin.quadratic)
 
     def test_from_path_missing_file_raises(self, api_config):
         with pytest.raises(FileNotFoundError):

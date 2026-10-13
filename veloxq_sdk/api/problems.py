@@ -40,7 +40,7 @@ from dimod.views.quadratic import Linear, Quadratic
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field, TypeAdapter
 from pydantic.alias_generators import to_camel
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from veloxq_sdk.api.core.base import BaseModel, build_adapters
 from veloxq_sdk.config import VeloxQAPIConfig
@@ -100,18 +100,21 @@ SPARSE_THRESHOLD = 0.15
 
 
 class InstanceDict(t.TypedDict):
-    """A dictionary type for Ising-model instances.
+    """A dictionary type for binary quadratic model instances.
 
     Attributes:
         biases (BiasesType): A list or NumPy array of float values
-            representing the bias terms in an Ising model.
+            representing the linear terms of the model.
         couplings (CouplingType): A nested list or NumPy array of float values
-            representing the coupling terms in an Ising model.
+            representing the quadratic terms of the model.
+        vartype (VartypeLike): Optional variable domain, ``'SPIN'`` (Ising,
+            the default) or ``'BINARY'`` (QUBO).
 
     """
 
     biases: BiasesType
     couplings: CouplingsType
+    vartype: NotRequired[VartypeLike]
 
 
 @build_adapters
@@ -748,26 +751,44 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
         """Create a File instance from a dictionary.
 
-        The Dictonary must follow InstanceDict specification.
+        The dictionary must follow the InstanceDict specification.
 
         Args:
-            data (InstanceDict): Must contain "biases" and "couplings" keys.
+            data (InstanceDict): Must contain "biases" and "couplings" keys;
+                an optional "vartype" key selects the variable domain.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
+            vartype (VartypeLike | None): Variable domain. When both this and
+                the "vartype" key are given they must agree. Defaults to SPIN.
+            init_state (SampleSet | None): Optional initial states.
             force (bool): If True, overwrite if a file with the same name exists.
 
         Returns:
-            File: A File object representing the newly created Ising data file.
+            File: A File object representing the newly created model file.
+
+        Raises:
+            ValueError: If `vartype` and the dictionary's "vartype" disagree.
 
         """
-        return cls.from_ising(
+        if "vartype" in data:
+            data_vartype = as_vartype(data["vartype"])
+            if vartype is not None and as_vartype(vartype) is not data_vartype:
+                msg = (
+                    f"vartype={as_vartype(vartype).name} conflicts with the "
+                    f"instance's vartype={data_vartype.name}."
+                )
+                raise ValueError(msg)
+            vartype = data_vartype
+        return cls._from_quadratic(
             biases=data["biases"],
             couplings=data["couplings"],
+            vartype=SPIN if vartype is None else vartype,
             name=name,
             problem=problem,
             init_state=init_state,
@@ -781,6 +802,7 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
     ) -> File:
@@ -793,15 +815,19 @@ class File(BaseModel):
                                   is a list, list-of-lists, or NumPy array.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
+            vartype (VartypeLike | None): Variable domain, 'SPIN' (default)
+                or 'BINARY'.
+            init_state (SampleSet | None): Optional initial states.
             force (bool): If True, overwrite if a file with the same name exists.
 
         Returns:
-            File: A newly created File containing the specified Ising data.
+            File: A newly created File containing the specified model.
 
         """
-        return cls.from_ising(
+        return cls._from_quadratic(
             biases=data[0],
             couplings=data[1],
+            vartype=SPIN if vartype is None else vartype,
             name=name,
             problem=problem,
             init_state=init_state,
@@ -815,33 +841,40 @@ class File(BaseModel):
         name: str | None = None,
         problem: Problem | None = None,
         *,
+        vartype: VartypeLike | None = None,
         init_state: SampleSet | None = None,
         force: bool = False,
-    ):
+    ) -> File:
         """Create a File instance from a Binary Quadratic Model (BQM).
 
-        This method converts the BQM into an Ising model format and uploads it.
+        The BQM is uploaded in its own variable domain (SPIN or BINARY) with
+        its offset, so the energies the solver reports equal `bqm.energy`.
 
         Args:
-            bqm (BinaryQuadraticModel): The BQM to convert and upload.
+            bqm (BinaryQuadraticModel): The BQM to upload.
             name (str | None): The file name. By default a hash-based name is generated.
             problem (Problem | None): Optional Problem to associate with.
+            vartype (VartypeLike | None): Convert the BQM to this domain before
+                uploading. Defaults to the BQM's own vartype.
+            init_state (SampleSet | None): Optional initial states.
             force (bool): If True, overwrite if a file with the same name exists.
 
         Returns:
             File: The resulting File object.
 
         """
-        ising = bqm.spin
+        if vartype is not None and as_vartype(vartype) is not bqm.vartype:
+            bqm = bqm.change_vartype(as_vartype(vartype), inplace=False)
 
-        return cls.from_ising(
-            biases=ising.linear,
-            couplings=ising.quadratic,
+        return cls._from_quadratic(
+            biases=bqm.linear,
+            couplings=bqm.quadratic,
+            vartype=bqm.vartype,
             name=name,
             problem=problem,
             init_state=init_state,
             force=force,
-            offset=ising.offset,
+            offset=bqm.offset,
         )
 
     @classmethod
