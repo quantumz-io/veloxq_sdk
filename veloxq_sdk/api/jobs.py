@@ -275,6 +275,7 @@ class JobUpdate(BasePydanticModel):
     status: JobStatus
     status_message: t.Optional[str] = None
     updated_at: datetime
+    result_available: t.Optional[bool] = None
 
 
 @build_adapters
@@ -285,6 +286,9 @@ class Job(BaseModel):
         created_at (datetime): The date/time when the job was created.
         updated_at (datetime): The date/time when the job was last updated.
         status (JobStatus): The current status of the job (e.g., RUNNING, COMPLETED).
+        result_available (bool | None): Whether the job saved a result. A
+            canceled job may have one. None when the server does not report
+            it, in which case only a completed job counts as having a result.
         statistics (JobStatistics): Execution statistics (time usage, cost, etc.).
         timeline (List[JobTimelineValue]): A chronological list of status changes.
 
@@ -302,6 +306,13 @@ class Job(BaseModel):
     status_message: t.Optional[str] = Field(
         default=None,
         description='Additional information about the job status, if available.',
+    )
+    result_available: t.Optional[bool] = Field(
+        default=None,
+        description=(
+            'Whether the job saved a result. A canceled job may have one. '
+            'None when the server does not report it.'
+        ),
     )
 
     statistics: JobStatistics = Field(
@@ -335,6 +346,7 @@ class Job(BaseModel):
                 waiting = not update.finished
                 self.status = update.status
                 self.status_message = update.status_message
+                self.result_available = update.result_available
                 self.updated_at = update.updated_at
                 self.statistics = update.statistics
                 self.timeline = update.timeline
@@ -375,6 +387,7 @@ class Job(BaseModel):
                 waiting = not status_update['finished']
 
         self.status = status_update['status']
+        self.result_available = status_update.get('resultAvailable')
         if refresh:
             self.statistics = JobStatistics.model_validate(status_update['statistics'])
             self.timeline = JobTimelineValue.adapters.list.validate_python(status_update['timeline'])
@@ -441,6 +454,11 @@ class Job(BaseModel):
         """Save the job hdf5 result to a local file."""
         copyfile(self._get_temp_result(), path)
 
+    def _has_result(self) -> bool:
+        if self.result_available is None:
+            return self.status == JobStatus.COMPLETED.value
+        return self.result_available
+
     def download_result(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
         """Download the result.
 
@@ -450,10 +468,10 @@ class Job(BaseModel):
                 Default is 1 MB.
 
         """
-        if self.status != JobStatus.COMPLETED.value:
-            self.refresh()  # Refresh the job status before checking again
-            if self.status != JobStatus.COMPLETED.value:
-                msg = f'Job {self.id} has not completed successfully.'
+        if not self._has_result():
+            self.refresh()
+            if not self._has_result():
+                msg = f'Job {self.id} has no result (status: {self.status}).'
                 raise RuntimeError(msg)
 
         download_url = self.http.get(f'jobs/{self.id}/result')

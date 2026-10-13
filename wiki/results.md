@@ -4,6 +4,8 @@
 
 When a job completes, the `job.result` property returns a `VeloxSampleSet` object, which inherits all implementations from dimod's `SampleSet` class. A `SampleSet` object contains the samples and associated data, such as energies, variable values, and per-sample data.
 
+`job.result_available` tells whether the job saved a result. A completed job always has one. A canceled job has one when it was canceled while the solver ran: the samples found up to that point are saved. It is `None` when the platform does not report it, and then only a completed job counts as having a result. Reading `job.result` from a job without a result raises `RuntimeError`.
+
 > **Note:** See [dimod's documentation for `SampleSet`](https://docs.dwavequantum.com/en/latest/ocean/api_ref_dimod/sampleset.html#dimod.SampleSet>) for more information regarding extra usage and features.
 
 ### 1.1 Properties

@@ -94,6 +94,10 @@ class TestJobModel:
     def test_file_defaults_to_none(self):
         assert make_job().file is None
 
+    def test_result_available_defaults_to_none(self):
+        assert make_job().result_available is None
+        assert make_job(resultAvailable=True).result_available is True
+
     def test_status_stored_as_value(self):
         assert make_job(status='completed').status == (
             JobStatus.COMPLETED.value
@@ -123,15 +127,27 @@ class TestWaitForCompletion:
 
         ws = FakeWS([
             json.dumps(update_json(finished=False)).encode(),
-            json.dumps(update_json(finished=True, status='completed')).encode(),
+            json.dumps(update_json(finished=True, status='canceled', resultAvailable=True)).encode(),
         ])
         paths = ws_factory(ws)
 
         job = make_job()
         job.wait_for_completion()
-        assert job.status == 'completed'
+        assert job.status == 'canceled'
+        assert job.result_available is True
         assert paths == ['jobs/j1/status-updates']
         assert ws.recv_calls == 2
+
+    def test_missing_result_available_stays_unknown(self, api_config, ws_factory):
+        from conftest import FakeWS
+
+        ws_factory(FakeWS([
+            json.dumps(update_json(finished=True, status='completed')).encode(),
+        ]))
+
+        job = make_job()
+        job.wait_for_completion()
+        assert job.result_available is None
 
     def test_refresh_updates_fields(self, api_config, ws_factory):
         from conftest import FakeWS
@@ -181,6 +197,7 @@ class TestGetJobUpdates:
                     finished=True,
                     status='completed',
                     statusMessage='done',
+                    resultAvailable=True,
                 ),
             ).encode(),
         ]))
@@ -188,8 +205,10 @@ class TestGetJobUpdates:
         job = make_job()
         updates = list(job.get_job_updates())
         assert [u.finished for u in updates] == [False, True]
+        assert [u.result_available for u in updates] == [None, True]
         assert job.status == 'completed'
         assert job.status_message == 'done'
+        assert job.result_available is True
         assert job.statistics.usage_time == 1.5
 
     def test_timeout_raises(self, api_config, ws_factory):
@@ -268,22 +287,42 @@ class TestDownloadResult:
         mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
         mock_api.add('GET', '/res', content=b'result-bytes')
         buffer = io.BytesIO()
-        make_job(status='completed').download_result(buffer)
+        make_job(status='completed', resultAvailable=True).download_result(buffer)
         assert buffer.getvalue() == b'result-bytes'
 
-    def test_refreshes_then_fails_if_not_completed(self, mock_api):
-        mock_api.add('GET', '/jobs/j1', json=job_json(status='running'))
-        with pytest.raises(RuntimeError, match='not completed'):
+    def test_canceled_job_with_a_result_downloads(self, mock_api):
+        mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
+        mock_api.add('GET', '/res', content=b'partial')
+        buffer = io.BytesIO()
+        make_job(status='canceled', resultAvailable=True).download_result(buffer)
+        assert buffer.getvalue() == b'partial'
+
+    def test_refreshes_then_fails_without_a_result(self, mock_api):
+        mock_api.add('GET', '/jobs/j1', json=job_json(status='canceled', resultAvailable=False))
+        with pytest.raises(RuntimeError, match='has no result'):
             make_job().download_result(io.BytesIO())
         assert mock_api.calls('GET', '/jobs/j1')
 
     def test_refresh_to_completed_allows_download(self, mock_api):
-        mock_api.add('GET', '/jobs/j1', json=job_json(status='completed'))
+        mock_api.add('GET', '/jobs/j1', json=job_json(status='completed', resultAvailable=True))
         mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
         mock_api.add('GET', '/res', content=b'ok')
         buffer = io.BytesIO()
         make_job(status='running').download_result(buffer)
         assert buffer.getvalue() == b'ok'
+
+    def test_completed_job_without_result_flag_downloads(self, mock_api):
+        mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
+        mock_api.add('GET', '/res', content=b'ok')
+        buffer = io.BytesIO()
+        make_job(status='completed').download_result(buffer)
+        assert buffer.getvalue() == b'ok'
+        assert not mock_api.calls('GET', '/jobs/j1')
+
+    def test_failed_job_without_result_flag_raises(self, mock_api):
+        mock_api.add('GET', '/jobs/j1', json=job_json(status='failed'))
+        with pytest.raises(RuntimeError, match='has no result'):
+            make_job(status='failed').download_result(io.BytesIO())
 
     def test_temp_result_downloads_once(self, mock_api, monkeypatch, tmp_path):
         monkeypatch.setattr(
@@ -292,7 +331,7 @@ class TestDownloadResult:
         mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
         mock_api.add('GET', '/res', content=b'cached')
 
-        job = make_job(status='completed')
+        job = make_job(status='completed', resultAvailable=True)
         first = job._get_temp_result()
         assert first.read_bytes() == b'cached'
         requests_after_first = len(mock_api.requests)
