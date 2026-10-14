@@ -46,6 +46,7 @@ class LogCategory(Enum):
     """Enumerate all possible categories for job logs.
 
     Attributes:
+        DEBUG (str): Debug messages.
         INFO (str): Informational messages.
         NOTICE (str): Notice messages.
         WARNING (str): Warning messages indicating potential issues.
@@ -55,6 +56,7 @@ class LogCategory(Enum):
 
     """
 
+    DEBUG = 'DEBUG'
     INFO = 'INFO'
     NOTICE = 'NOTICE'
     WARNING = 'WARNING'
