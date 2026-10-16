@@ -29,7 +29,7 @@ from functools import cached_property
 from os import PathLike
 from pathlib import Path
 from shutil import copyfile
-from tempfile import gettempdir
+from tempfile import NamedTemporaryFile, gettempdir
 
 import h5py
 import numpy as np
@@ -461,11 +461,11 @@ class Job(BaseModel):
             return self.status == JobStatus.COMPLETED.value
         return self.result_available
 
-    def download_result(self, file: t.BinaryIO, chunk_size: int = 1024 * 1024) -> None:
+    def download_result(self, file: t.IO[bytes], chunk_size: int = 1024 * 1024) -> None:
         """Download the result.
 
         Args:
-            file (t.BinaryIO): The destination file-like object to write the content to.
+            file (t.IO[bytes]): The destination file-like object to write the content to.
             chunk_size (int): The size (in bytes) of each chunk read from the response. 
                 Default is 1 MB.
 
@@ -562,8 +562,16 @@ class Job(BaseModel):
         if temp_file.exists() and temp_file.stat().st_size > 0:
             return temp_file
 
-        with temp_file.open('wb') as f:
-            self.download_result(f)
+        part = NamedTemporaryFile(
+            dir=temp_file.parent, prefix=f'{self.id}.', suffix='.part', delete=False,
+        )
+        part_path = Path(part.name)
+        try:
+            with part:
+                self.download_result(part)
+            part_path.replace(temp_file)
+        finally:
+            part_path.unlink(missing_ok=True)
         return temp_file
 
 
