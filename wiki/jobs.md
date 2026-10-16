@@ -97,9 +97,11 @@ for entry in logs:
     print(f"[{entry.timestamp}] {entry.category}: {entry.message}")
 ```
 
+`LogCategory` has the members `DEBUG`, `INFO`, `NOTICE`, `WARNING`, `ERROR`, `CRITICAL`, and `PROGRESS`.
+
 ### 2.6 Canceling a Job
 
-`job.cancel()` request a  job to be canceled. The call returns as soon as the request is recorded. The job then ends through its normal updates, with status `CANCELED` unless the solver had already finished. A job canceled while the solver was running keeps the samples found up to that point, so `job.result_available` is `True` and `job.result` holds them.
+`job.cancel()` requests that a job be canceled. The call returns as soon as the request is recorded. The job then ends through its normal updates, with status `CANCELED` unless the solver had already finished. A job canceled while the solver was running keeps the samples found up to that point, so `job.result_available` is `True` and `job.result` holds them.
 
 ```python
 job = solver.submit(file_obj)
