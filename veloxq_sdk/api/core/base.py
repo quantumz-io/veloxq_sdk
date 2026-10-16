@@ -16,7 +16,7 @@ from __future__ import annotations
 import typing as t
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 from typing_extensions import Self, TypedDict
 
@@ -54,15 +54,13 @@ def build_adapters(cls: type[_T]) -> type[_T]:
 class BasePydanticModel(PydanticBaseModel):
     """Base class for Pydantic models with custom configuration."""
 
-    class Config:
-        """Configuration for the Pydantic model."""
-
-        extra = 'ignore'
-        alias_generator = to_camel
-        populate_by_name = True  # Allow population by field name
-        use_enum_values = True
-        validate_by_name = True
-        validate_by_alias = True
+    model_config = ConfigDict(
+        extra='ignore',
+        alias_generator=to_camel,
+        use_enum_values=True,
+        validate_by_name=True,
+        validate_by_alias=True,
+    )
 
     adapters: t.ClassVar[Adapters[Self]] = None
 

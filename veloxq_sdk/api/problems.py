@@ -38,7 +38,7 @@ from dimod.sampleset import SampleSet
 from dimod.vartypes import BINARY, SPIN, Vartype, as_vartype
 from dimod.views.quadratic import Linear, Quadratic
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 from typing_extensions import NotRequired, TypedDict
 
@@ -278,10 +278,11 @@ class File(BaseModel):
     class _PreassignedChunkUploader(PydanticBaseModel):
         """Helper class for multipart chunked uploads."""
 
-        class Config:
-            alias_generator = to_camel
-            validate_by_alias = True
-            validate_by_name = True
+        model_config = ConfigDict(
+            alias_generator=to_camel,
+            validate_by_alias=True,
+            validate_by_name=True,
+        )
 
         class _PreasignedUploadChunk(TypedDict):
             """Represents a single chunk in a multipart upload."""
@@ -359,10 +360,11 @@ class File(BaseModel):
     class _PreassignedUploader(PydanticBaseModel):
         """Helper class for multipart chunked uploads."""
 
-        class Config:
-            alias_generator = to_camel
-            validate_by_alias = True
-            validate_by_name = True
+        model_config = ConfigDict(
+            alias_generator=to_camel,
+            validate_by_alias=True,
+            validate_by_name=True,
+        )
 
         file: File
         upload_url: str
