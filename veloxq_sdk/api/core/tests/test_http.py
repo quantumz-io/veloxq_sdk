@@ -16,6 +16,7 @@
 import ssl
 from contextlib import contextmanager
 
+import certifi
 import httpx
 import pytest
 
@@ -61,6 +62,12 @@ class TestRestClient:
         client = RestClient()
         assert isinstance(seen['verify'], ssl.SSLContext)
         assert seen['verify'] is client._ws_ssl
+
+    def test_ca_file_is_loaded_as_cafile(self, api_config):
+        # A cafile loads its certificates eagerly, a capath only on demand.
+        api_config.ssl_context = certifi.where()
+        client = RestClient()
+        assert client._ws_ssl.cert_store_stats()['x509_ca'] > 0
 
     def test_client_mixin_returns_singleton(self, api_config):
         assert ClientMixin.http is ClientMixin.http
