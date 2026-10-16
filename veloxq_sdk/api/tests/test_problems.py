@@ -28,7 +28,10 @@ import pytest
 from dimod import BinaryQuadraticModel
 from dimod.sampleset import SampleSet
 
+from veloxq_sdk.api.jobs import VeloxSampleSet
 from veloxq_sdk.api.problems import File, Problem, _is_azure_blob_url
+
+from .test_jobs import write_result_h5
 
 
 def file_json(
@@ -413,6 +416,39 @@ class TestWriteIsingHdf5:
         path = self._write(tmp_path, biases, couplings, init_state=init_state)
         with h5py.File(path, 'r') as hdf:
             assert hdf['Spectrum']['states'][:].tolist() == states
+
+    @pytest.mark.parametrize(
+        ('biases', 'couplings'),
+        [
+            ({'b': 0.0, 'a': 0.0}, {('c', 'a'): 1.0}),
+            ([0.0, 0.0], {(3, 0): 1.0}),
+        ],
+    )
+    def test_hdf5_result_relabelled_by_position_matches_model(
+        self, tmp_path, biases, couplings,
+    ):
+        bqm = BinaryQuadraticModel(biases, couplings, 'SPIN')
+        labels = File._normalize_ising_inputs(biases, couplings)['labels']
+        states = [[1, 1, -1], [-1, 1, 1]]
+        result_path = tmp_path / 'result.h5'
+        write_result_h5(
+            result_path,
+            states=states,
+            energies=[0.0, 1.0],
+            metadata={},
+            labels=np.array(list(labels), dtype=h5py.string_dtype()),
+        )
+        with h5py.File(result_path, 'r') as hdf:
+            result = VeloxSampleSet.from_result(hdf)
+        result = result.relabel_variables(
+            dict(zip(result.variables, bqm.variables)), inplace=False,
+        )
+
+        rows = [[sample[v] for v in bqm.variables] for sample in result.samples()]
+        assert sorted(rows) == sorted(states)
+        path = self._write(tmp_path, biases, couplings, init_state=result)
+        with h5py.File(path, 'r') as hdf:
+            assert sorted(hdf['Spectrum']['states'][:].tolist()) == sorted(states)
 
     def test_init_state_missing_label_raises(self, tmp_path):
         init_state = SampleSet.from_samples(
