@@ -129,12 +129,6 @@ class TestJobListing:
 
 
 class TestResultMetadata:
-    @pytest.mark.xfail(
-        reason='the live jobs/{id}/result_metadata endpoint hangs until '
-               'the client read timeout',
-        strict=False,
-        raises=httpx.ReadTimeout,
-    )
     def test_result_metadata_of_completed_job(self):
         jobs = Job.get_jobs(status=JobStatus.COMPLETED, limit=1)
         if not jobs:
