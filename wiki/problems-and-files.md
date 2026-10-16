@@ -37,7 +37,7 @@ Files are where your actual data is stored. You can create them from several inp
 
 A file holds one binary quadratic model: linear terms (`biases`), quadratic terms (`couplings`), a variable domain, and a constant energy offset. The domain is either **SPIN**, an Ising model with variables in {-1, +1}, or **BINARY**, a QUBO with variables in {0, 1}. Section 2.4 describes how to choose the domain and carry an offset.
 
-> **Note:** By default, if a file with the same name (within the same problem) already exists, the SDK will return that existing file unless you set `force=True` to overwrite it.
+> **Note:** By default, if a completed file with the same name already exists in the same problem, the SDK returns that file instead of uploading. Set `force=True` to replace it. See [Uploading & Overwriting Files](#3-uploading--overwriting-files).
 
 ### 2.1 From a Local File Path
 
@@ -361,6 +361,8 @@ Converting the domain changes the biases, couplings, and offset together, so the
 
 An initial state passed through `init_state` is a `dimod.SampleSet` whose `vartype` must match the model's. A mismatch raises a `ValueError`. Convert it first with `init_state.change_vartype("BINARY")` or `init_state.change_vartype("SPIN")`.
 
+The `SampleSet` needs one column per model variable, otherwise a `TypeError` is raised. Its columns are matched to the model variables by label, so their order does not matter. A model variable with no column of the same label raises a `ValueError`. A result from an earlier job is labelled with strings, so relabel it before reuse as shown in [Accessing Results](results.md#1-direct-access-via-veloxsampleset).
+
 ```python
 import dimod
 
@@ -399,7 +401,9 @@ file_obj = File.from_instance(existing_file_obj)
 Every method above that "creates" a `File` also performs an upload if the underlying data is not already in VeloxQ:
 
 - When you call `from_instance(...)`, `from_path(...)`, `from_dict(...)`, etc., the file is uploaded automatically.
-- If you re-use the same `name` without setting `force=True`, you’ll get the existing file object without uploading again.
+- If you re-use the `name` of a completed file without setting `force=True`, you get the existing file object without uploading again.
+- With `force=True`, a completed file of the same name is replaced. A file of the same name whose upload failed or was canceled is replaced with or without `force`.
+- A file of the same name whose upload is still in progress blocks the upload, with or without `force=True`. The server rejects the request with status 409 and the SDK raises `httpx.HTTPStatusError`. Wait for that upload to finish, cancel it with `File.get_file(name, problem=problem).cancel()`, or use another name.
 
 **Example of explicitly forcing an overwrite:**
 
