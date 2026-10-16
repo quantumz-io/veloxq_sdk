@@ -473,7 +473,9 @@ class Job(BaseModel):
         if not self._has_result():
             self.refresh()
             if not self._has_result():
-                msg = f'Job {self.id} has no result (status: {self.status}).'
+                msg = f'Job {self.id} has no result (status: {self.status})'
+                if self.status_message:
+                    msg += f': {self.status_message}'
                 raise RuntimeError(msg)
 
         download_url = self.http.get(f'jobs/{self.id}/result')
