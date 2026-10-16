@@ -25,8 +25,8 @@ from websockets.uri import parse_uri
 
 try:
     from websockets.proxy import get_proxy, parse_proxy
-except ImportError:  # websockets < 15 does not connect through proxies
-    get_proxy = None
+except ImportError:  # websockets 15 keeps them in websockets.uri
+    from websockets.uri import get_proxy, parse_proxy
 
 from veloxq_sdk.config import VeloxQAPIConfig
 
@@ -120,8 +120,6 @@ class RestClient(httpx.Client):
 
 def _uses_https_proxy(url: str) -> bool:
     """Whether websockets connects to `url` through an https:// proxy."""
-    if get_proxy is None:
-        return False
     proxy = get_proxy(parse_uri(url))
     return proxy is not None and parse_proxy(proxy).scheme == 'https'
 

@@ -19,7 +19,6 @@ from contextlib import contextmanager
 import httpx
 import pytest
 
-from veloxq_sdk.api.core import http
 from veloxq_sdk.api.core.http import ClientMixin, RestClient
 
 
@@ -176,7 +175,6 @@ class TestOpenWs:
 
         return set_proxy
 
-    @pytest.mark.skipif(http.get_proxy is None, reason='websockets < 15 has no proxy support')
     def test_https_proxy_uses_configured_ssl(self, api_config, connect_kwargs, proxy_env):
         proxy_env('https://proxy.corp:443')
         context = ssl.create_default_context()
