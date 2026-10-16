@@ -144,11 +144,6 @@ class TestResultMetadata:
 
 
 class TestCancel:
-    @pytest.mark.xfail(
-        reason='the live API has not deployed POST jobs/{id}/cancel yet',
-        strict=True,
-        raises=httpx.HTTPStatusError,
-    )
     def test_cancel_ends_the_job_as_canceled(self):
         # Enough work to outlast the cancel round trip, small enough to
         # finish within SOLVE_TIMEOUT if the cancel is not honored.
@@ -235,12 +230,6 @@ class TestSolveEndToEnd:
             result.energy, bqm.energies(result.sample), atol=1e-5,
         )
 
-    @pytest.mark.xfail(
-        reason='the deployed solver predates offset support and reports '
-               'energies without the constant term',
-        strict=False,
-        raises=AssertionError,
-    )
     def test_energy_offset_is_applied(self):
         bqm = dimod.BinaryQuadraticModel.from_qubo(
             {(0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0, (0, 1): -2.0, (1, 2): -2.0},
