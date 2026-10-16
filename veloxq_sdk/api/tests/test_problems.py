@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 
 import dimod
 import h5py
@@ -515,6 +516,38 @@ class TestFileEndpoints:
         request = mock_api.calls('POST', '/files/direct')[0]
         assert json.loads(request.content)['num_chunks'] == 0
 
+    @pytest.mark.parametrize(
+        ('force', 'message'),
+        [
+            (False, "File 'data.h5' already exists on the server or is still uploading"),
+            (True, "File 'data.h5' is still uploading on the server"),
+        ],
+    )
+    def test_create_direct_conflict_names_the_file(self, mock_api, force, message):
+        mock_api.add(
+            'POST', '/files/direct', status_code=409,
+            json={'message': "A file named 'data.h5' is currently being uploaded"},
+        )
+        with pytest.raises(httpx.HTTPStatusError, match=message) as exc_info:
+            File.create_direct(name='data.h5', size=10, force=force)
+        assert exc_info.value.response.status_code == 409
+        assert "File.get_file('data.h5').cancel()" in str(exc_info.value)
+        assert 'currently being uploaded' in str(exc_info.value.__cause__)
+
+    def test_create_direct_conflict_hint_names_the_problem(self, mock_api):
+        mock_api.add('POST', '/problems/p1/files/direct', status_code=409, json={})
+        problem = Problem.model_validate(problem_json())
+        with pytest.raises(
+            httpx.HTTPStatusError,
+            match=re.escape("File.get_file('data.h5', problem=problem).cancel()"),
+        ):
+            File.create_direct(name='data.h5', size=10, problem=problem, force=True)
+
+    def test_create_direct_other_errors_propagate(self, mock_api):
+        mock_api.add('POST', '/files/direct', status_code=500, json={'message': 'boom'})
+        with pytest.raises(httpx.HTTPStatusError, match='boom'):
+            File.create_direct(name='data.h5', size=10)
+
     def test_create_direct_with_problem_endpoint(self, mock_api):
         mock_api.add(
             'POST',
@@ -1007,7 +1040,10 @@ class TestFromConstructors:
     def test_from_path_returns_existing_file(self, mock_api, tmp_path):
         path = tmp_path / 'data.h5'
         path.write_bytes(b'content')
-        mock_api.add('GET', '/files', json={'data': [file_json(name='data.h5')]})
+        mock_api.add(
+            'GET', '/files',
+            json={'data': [file_json(name='data.h5', status='completed')]},
+        )
         file = File.from_path(path)
         assert file.id == 'f1'
         # only the existence lookup, no upload initiation
@@ -1057,7 +1093,7 @@ class TestFromConstructors:
     def test_from_io_returns_existing_file(self, mock_api):
         payload = b'known content'
         digest = hashlib.sha256(payload).hexdigest()
-        existing = file_json(name=f'{digest}.h5')
+        existing = file_json(name=f'{digest}.h5', status='completed')
         mock_api.add('GET', '/files', json={'data': [existing]})
 
         file = File.from_io(io.BytesIO(payload))
@@ -1071,7 +1107,7 @@ class TestFromConstructors:
         def files_handler(request):
             name = request.url.params['name']
             return httpx.Response(
-                200, json={'data': [file_json(name=name)]},
+                200, json={'data': [file_json(name=name, status='completed')]},
             )
 
         mock_api.add_handler('GET', '/files', files_handler)
@@ -1081,13 +1117,23 @@ class TestFromConstructors:
 
     def test_from_ising_normalizes_name_and_short_circuits(self, mock_api):
         mock_api.add(
-            'GET', '/files', json={'data': [file_json(name='inst.h5')]},
+            'GET', '/files',
+            json={'data': [file_json(name='inst.h5', status='completed')]},
         )
         file = File.from_ising([1.0, -1.0], [[0.0, 1.0], [1.0, 0.0]], name='inst.txt')
         assert file.name == 'inst.h5'
         lookup = mock_api.calls('GET', '/files')[0]
         assert lookup.url.params['name'] == 'inst.h5'
         assert len(mock_api.requests) == 1
+
+    def test_in_flight_upload_of_the_same_name_raises(self, mock_api):
+        mock_api.add(
+            'GET', '/files',
+            json={'data': [file_json(name='inst.h5', status='uploading')]},
+        )
+        mock_api.add('POST', '/files/direct', status_code=409, json={})
+        with pytest.raises(httpx.HTTPStatusError, match='still uploading'):
+            File.from_ising([1.0], {}, name='inst')
 
     def test_from_ising_uploads_valid_hdf5(self, mock_api, monkeypatch):
         puts = []

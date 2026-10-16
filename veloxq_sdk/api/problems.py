@@ -562,6 +562,10 @@ class File(BaseModel):
         Returns:
             _PreassignedUploader | _PreassignedChunkUploader: An object containing the file reference and upload plan.
 
+        Raises:
+            httpx.HTTPStatusError: On a name conflict (409), with a message
+                naming the file.
+
         """
         settings = VeloxQAPIConfig.instance()
         if size <= settings.max_single_upload_size:
@@ -583,7 +587,29 @@ class File(BaseModel):
                 "force": force,
             },
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as err:
+            if response.status_code != httpx.codes.CONFLICT:
+                raise
+            problem_arg = "" if problem is None else ", problem=problem"
+            cancel_hint = (
+                f"cancel that upload with File.get_file('{name}'{problem_arg}).cancel()"
+            )
+            if force:
+                msg = (
+                    f"File '{name}' is still uploading on the server. Wait for "
+                    f"that upload to finish, {cancel_hint}, or use another name."
+                )
+            else:
+                msg = (
+                    f"File '{name}' already exists on the server or is still "
+                    "uploading. Pass force=True to replace a completed file, "
+                    f"or {cancel_hint}."
+                )
+            raise httpx.HTTPStatusError(
+                msg, request=err.request, response=err.response,
+            ) from err
         return cls._uploader.validate_json(response.content)
 
     @classmethod
@@ -641,6 +667,14 @@ class File(BaseModel):
         if existing_files:
             return existing_files[0]
         return None
+
+    @classmethod
+    def _get_completed_file(cls, name: str, problem: Problem | None) -> File | None:
+        """Return the file named `name` if its upload completed."""
+        file = cls.get_file(name=name, problem=problem)
+        if file is None or file.status != "completed":
+            return None
+        return file
 
     @classmethod
     def from_id(cls, file_id: str) -> File:
@@ -1014,7 +1048,7 @@ class File(BaseModel):
             if (ext_idx := name.find(".")) != -1:
                 name = name[:ext_idx]
             name += ".h5"
-            if not force and (file := cls.get_file(name=name, problem=problem)):
+            if not force and (file := cls._get_completed_file(name=name, problem=problem)):
                 return file
 
         temp_file_path = None
@@ -1035,7 +1069,7 @@ class File(BaseModel):
                 temp_file.seek(0)
                 name = name or (cls._create_hash(temp_file) + ".h5")
 
-            if not force and (file := cls.get_file(name=name, problem=problem)):
+            if not force and (file := cls._get_completed_file(name=name, problem=problem)):
                 return file
             file_uploader = cls.create_direct(
                 name=name, size=temp_file_size, problem=problem, force=force
@@ -1082,7 +1116,7 @@ class File(BaseModel):
             raise FileNotFoundError(msg)
         name = name or path.name
 
-        if not force and (file := cls.get_file(name=name, problem=problem)):
+        if not force and (file := cls._get_completed_file(name=name, problem=problem)):
             return file
 
         file_uploader = cls.create_direct(
@@ -1128,7 +1162,7 @@ class File(BaseModel):
         if name.find(".") == -1:
             name += f".{extension}"
 
-        if not force and (file := cls.get_file(name=name, problem=problem)):
+        if not force and (file := cls._get_completed_file(name=name, problem=problem)):
             return file
 
         new_file = cls.create(
