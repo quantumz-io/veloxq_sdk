@@ -381,6 +381,51 @@ class TestWriteIsingHdf5:
             assert spectrum.attrs['var_type'] == 'BINARY'
             assert spectrum['states'][:].tolist() == states.tolist()
 
+    def test_init_state_columns_follow_model_labels(self, tmp_path):
+        init_state = SampleSet.from_samples(
+            {'a': 1, 'b': -1}, energy=[0.0], vartype='SPIN',
+        )
+        path = self._write(
+            tmp_path,
+            {'b': 0.0, 'a': 0.0},
+            {('a', 'b'): 1.0},
+            init_state=init_state,
+        )
+        with h5py.File(path, 'r') as hdf:
+            labels = hdf['Ising']['labels'].asstr()[:].tolist()
+            states = hdf['Spectrum']['states'][0].tolist()
+        assert dict(zip(labels, states)) == {'a': 1, 'b': -1}
+
+    def test_result_relabelled_by_position_warm_starts_its_model(self, tmp_path):
+        biases = {'b': 0.0, 'a': 0.0}
+        couplings = {('c', 'a'): 1.0}
+        bqm = BinaryQuadraticModel(biases, couplings, 'SPIN')
+        states = [[1, 1, -1]]
+        # The solver returns the columns in upload order, labelled with the
+        # uploaded labels as strings.
+        labels = File._normalize_ising_inputs(biases, couplings)['labels']
+        result = SampleSet.from_samples(
+            (states, list(labels)), vartype='SPIN', energy=[0.0], sort_labels=False,
+        )
+        init_state = result.relabel_variables(
+            dict(zip(result.variables, bqm.variables)), inplace=False,
+        )
+        path = self._write(tmp_path, biases, couplings, init_state=init_state)
+        with h5py.File(path, 'r') as hdf:
+            assert hdf['Spectrum']['states'][:].tolist() == states
+
+    def test_init_state_missing_label_raises(self, tmp_path):
+        init_state = SampleSet.from_samples(
+            {'a': 1, 'c': -1}, energy=[0.0], vartype='SPIN',
+        )
+        with pytest.raises(ValueError, match=r"no column for model variables \['b'\]"):
+            self._write(
+                tmp_path,
+                {'a': 0.0, 'b': 0.0},
+                {('a', 'b'): 1.0},
+                init_state=init_state,
+            )
+
     def test_init_state_vartype_mismatch_raises(self, tmp_path):
         init_state = SampleSet.from_samples(
             np.array([[1, -1]], dtype=np.int8), energy=[0.0], vartype='SPIN',

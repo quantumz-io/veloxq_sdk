@@ -212,7 +212,10 @@ class TestSolveEndToEnd:
             job = solver.submit(file)
             job.wait_for_completion(timeout=SOLVE_TIMEOUT, refresh=True)
             assert job.status == JobStatus.COMPLETED.value
-            return job.result
+            result = job.result
+            return result.relabel_variables(
+                dict(zip(result.variables, bqm.variables)), inplace=False,
+            )
         finally:
             delete_and_assert_gone(file)
 

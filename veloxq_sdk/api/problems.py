@@ -90,6 +90,7 @@ if t.TYPE_CHECKING:
         cols: np.ndarray[tuple[int], np.dtype[np.integer]]
         values: np.ndarray[tuple[int], np.dtype[np.number]]
         labels: np.ndarray[tuple[int], np.dtype[np.str_]]
+        variables: list[VariableType]
         idx_dtype: np.dtype[np.integer]
         size: int
         offset: float
@@ -1214,6 +1215,8 @@ class File(BaseModel):
         Sparse indices are stored 1-based to match the solver reader.
         An initial state is stored as a `Spectrum` group; without the `type`
         and `var_type` attributes the solver would read it as a SPIN spectrum.
+        Its columns are matched to the model variables by label. A model
+        variable without a column raises `ValueError`.
         """
         normalized = File._normalize_ising_inputs(
             biases, couplings, vartype=vartype, offset=offset,
@@ -1230,6 +1233,21 @@ class File(BaseModel):
                 f"init_state.change_vartype('{var_type_name}')."
             )
             raise ValueError(msg)
+
+        if init_state is not None:
+            states = init_state.record.sample
+            energies = init_state.record.energy
+            num_rep = energies.shape[0]
+            if energies.shape != (num_rep,) or states.shape != (num_rep, size):
+                msg = "Initial SampleSet needs to have consistent size and fit the instance."
+                raise TypeError(msg)
+            variables = normalized["variables"]
+            missing = [v for v in variables if v not in init_state.variables]
+            if missing:
+                msg = f"Initial SampleSet has no column for model variables {missing}."
+                raise ValueError(msg)
+            # The SampleSet orders its columns independently of the model.
+            states = states[:, [init_state.variables.index(v) for v in variables]]
 
         # Use libver='latest' for better performance with large files
         with h5py.File(file, "w", libver='latest') as hdf:
@@ -1333,12 +1351,6 @@ class File(BaseModel):
 
             # Include the initial state as spectrum
             if init_state is not None:
-                states = init_state.record.sample
-                energies = init_state.record.energy
-                num_rep = energies.shape[0]
-                if energies.shape != (num_rep,) or states.shape != (num_rep, size):
-                    msg = "Initial SampleSet needs to have consistent size and fit the instance."
-                    raise TypeError(msg)
                 spectrum = hdf.require_group("Spectrum")
                 spectrum.attrs["type"] = "Spectrum"
                 spectrum.attrs["var_type"] = var_type_name
@@ -1554,6 +1566,7 @@ class File(BaseModel):
             "cols": cols_arr,
             "values": values_arr,
             "labels": labels,
+            "variables": list(biases_dict.keys()),
             "idx_dtype": idx_dtype,
             "size": size,
             "offset": offset,
