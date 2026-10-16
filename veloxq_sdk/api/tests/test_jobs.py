@@ -318,6 +318,13 @@ class TestDownloadResult:
             make_job().download_result(io.BytesIO())
         assert mock_api.calls('GET', '/jobs/j1')
 
+    def test_missing_result_error_includes_status_message(self, mock_api):
+        mock_api.add('GET', '/jobs/j1', json=job_json(
+            status='failed', resultAvailable=False, statusMessage='out of memory',
+        ))
+        with pytest.raises(RuntimeError, match=r'has no result \(status: failed\): out of memory'):
+            make_job().download_result(io.BytesIO())
+
     def test_refresh_to_completed_allows_download(self, mock_api):
         mock_api.add('GET', '/jobs/j1', json=job_json(status='completed', resultAvailable=True))
         mock_api.add('GET', '/jobs/j1/result', text='"https://blob.test/res"')
