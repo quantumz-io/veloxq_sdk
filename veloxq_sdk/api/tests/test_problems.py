@@ -391,12 +391,13 @@ class TestWriteIsingHdf5:
         path = self._write(
             tmp_path,
             {'b': 0.0, 'a': 0.0},
-            {('a', 'b'): 1.0},
+            {('b', 'a'): 1.0},
             init_state=init_state,
         )
         with h5py.File(path, 'r') as hdf:
             labels = hdf['Ising']['labels'].asstr()[:].tolist()
             states = hdf['Spectrum']['states'][0].tolist()
+        assert labels != list(init_state.variables)
         assert dict(zip(labels, states)) == {'a': 1, 'b': -1}
 
     def test_result_relabelled_by_position_warm_starts_its_model(self, tmp_path):
