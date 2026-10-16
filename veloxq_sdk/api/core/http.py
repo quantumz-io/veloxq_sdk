@@ -38,7 +38,8 @@ class RestClient(httpx.Client):
 
     def __init__(self) -> None:
         config = VeloxQAPIConfig.instance()
-        super().__init__(verify=config.ssl_context)
+        verify = _ssl_verify(config.ssl_context)
+        super().__init__(verify=verify)
         config.observe(self._update_token, names='token')
         config.observe(self._update_url, names='url')
         config.observe(self._update_ssl_context, names='ssl_context')
@@ -48,7 +49,7 @@ class RestClient(httpx.Client):
             'response': [self.update_response_reason],
         }
         self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
-        self._ws_ssl = _websocket_ssl(config.ssl_context)
+        self._ws_ssl = _websocket_ssl(verify)
 
     def _update_token(self, change: dict) -> None:
         """Update the API token in the headers."""
@@ -60,8 +61,9 @@ class RestClient(httpx.Client):
 
     def _update_ssl_context(self, change: dict) -> None:
         """Update the SSL context in the client."""
-        self._ws_ssl = _websocket_ssl(change['new'])
-        self.verify = change['new']
+        verify = _ssl_verify(change['new'])
+        self._ws_ssl = _websocket_ssl(verify)
+        self.verify = verify
 
     @contextmanager
     def open_ws(
@@ -124,15 +126,20 @@ def _uses_https_proxy(url: str) -> bool:
     return proxy is not None and parse_proxy(proxy).scheme == 'https'
 
 
-def _websocket_ssl(setting: ssl.SSLContext | str | bool) -> ssl.SSLContext | None:
-    """Convert ``ssl_context`` setting into websocket's ``ssl`` argument."""
-    if isinstance(setting, ssl.SSLContext):
-        return setting
+def _ssl_verify(setting: ssl.SSLContext | str | bool) -> ssl.SSLContext | bool:
+    """Convert ``ssl_context`` setting into httpx's ``verify`` argument."""
     if isinstance(setting, str):
         if os.path.isdir(setting):  # noqa: PTH112
             return ssl.create_default_context(capath=setting)
         return ssl.create_default_context(cafile=setting)
-    if setting:
+    return setting
+
+
+def _websocket_ssl(verify: ssl.SSLContext | bool) -> ssl.SSLContext | None:
+    """Convert httpx's ``verify`` argument into websocket's ``ssl`` argument."""
+    if isinstance(verify, ssl.SSLContext):
+        return verify
+    if verify:
         return None
     context = ssl.create_default_context()
     context.check_hostname = False

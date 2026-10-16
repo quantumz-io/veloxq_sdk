@@ -46,6 +46,22 @@ class TestRestClient:
         api_config.url = 'https://other.test'
         assert str(client.base_url) == 'https://other.test'
 
+    def test_ca_path_reaches_httpx_as_ssl_context(
+        self, api_config, tmp_path, monkeypatch,
+    ):
+        seen = {}
+        init = httpx.Client.__init__
+
+        def spy(client, *args, **kwargs):
+            seen.update(kwargs)
+            init(client, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, '__init__', spy)
+        api_config.ssl_context = str(tmp_path)
+        client = RestClient()
+        assert isinstance(seen['verify'], ssl.SSLContext)
+        assert seen['verify'] is client._ws_ssl
+
     def test_client_mixin_returns_singleton(self, api_config):
         assert ClientMixin.http is ClientMixin.http
         assert ClientMixin().http is ClientMixin.http
