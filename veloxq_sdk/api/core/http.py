@@ -11,12 +11,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import atexit
+import os
+import ssl
 import typing as t
 from contextlib import contextmanager, suppress
 
 import httpx
 from websockets.sync.client import ClientConnection, connect
+from websockets.uri import parse_uri
+
+try:
+    from websockets.proxy import get_proxy, parse_proxy
+except ImportError:  # websockets < 15 does not connect through proxies
+    get_proxy = None
 
 from veloxq_sdk.config import VeloxQAPIConfig
 
@@ -38,7 +48,7 @@ class RestClient(httpx.Client):
             'response': [self.update_response_reason],
         }
         self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
-        self._ssl_context = config.ssl_context
+        self._ws_ssl = _websocket_ssl(config.ssl_context)
 
     def _update_token(self, change: dict) -> None:
         """Update the API token in the headers."""
@@ -50,15 +60,22 @@ class RestClient(httpx.Client):
 
     def _update_ssl_context(self, change: dict) -> None:
         """Update the SSL context in the client."""
-        self._ssl_context = change['new']
+        self._ws_ssl = _websocket_ssl(change['new'])
         self.verify = change['new']
 
     @contextmanager
-    def open_ws(self, path: str) -> t.Iterator[ClientConnection]:
+    def open_ws(
+        self,
+        path: str,
+        *,
+        open_timeout: float | None = 10,
+    ) -> t.Iterator[ClientConnection]:
         """Context manager to open a WebSocket connection.
 
         Args:
             path (str): The WebSocket path to connect to.
+            open_timeout (float | None): Seconds allowed for the opening
+                handshake. None waits indefinitely.
 
         Yields:
             connect: A WebSocket connection object.
@@ -75,7 +92,15 @@ class RestClient(httpx.Client):
                self.API_KEY_HEADER: token,
             }
         )
-        with connect(str(url), proxy_ssl=self._ssl_context) as ws:
+        kwargs = {}
+        if _uses_https_proxy(str(url)):
+            kwargs['proxy_ssl'] = self._ws_ssl
+        with connect(
+            str(url),
+            ssl=self._ws_ssl,
+            open_timeout=open_timeout,
+            **kwargs,
+        ) as ws:
             yield ws  # type: ignore[return]
 
     @staticmethod
@@ -91,6 +116,31 @@ class RestClient(httpx.Client):
         except Exception:
             if message:
                 response.extensions['reason_phrase'] = message
+
+
+def _uses_https_proxy(url: str) -> bool:
+    """Whether websockets connects to `url` through an https:// proxy."""
+    if get_proxy is None:
+        return False
+    proxy = get_proxy(parse_uri(url))
+    return proxy is not None and parse_proxy(proxy).scheme == 'https'
+
+
+def _websocket_ssl(setting: ssl.SSLContext | str | bool) -> ssl.SSLContext | None:
+    """Convert ``ssl_context`` setting into websocket's ``ssl`` argument."""
+    if isinstance(setting, ssl.SSLContext):
+        return setting
+    if isinstance(setting, str):
+        if os.path.isdir(setting):  # noqa: PTH112
+            return ssl.create_default_context(capath=setting)
+        return ssl.create_default_context(cafile=setting)
+    if setting:
+        return None
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
 
 class _RestClientGetter:
     client = None

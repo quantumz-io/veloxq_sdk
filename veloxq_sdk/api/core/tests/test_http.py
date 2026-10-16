@@ -13,11 +13,13 @@
 
 """Atomic tests for veloxq_sdk.api.core.http."""
 
+import ssl
 from contextlib import contextmanager
 
 import httpx
 import pytest
 
+from veloxq_sdk.api.core import http
 from veloxq_sdk.api.core.http import ClientMixin, RestClient
 
 
@@ -77,9 +79,8 @@ class TestOpenWs:
             with client.open_ws('jobs/1/status-updates'):
                 pass
 
-    def test_builds_wss_url_with_token_and_ssl_context(
-        self, api_config, monkeypatch,
-    ):
+    @pytest.fixture
+    def connect_kwargs(self, monkeypatch):
         recorded = {}
 
         @contextmanager
@@ -91,14 +92,103 @@ class TestOpenWs:
         monkeypatch.setattr(
             'veloxq_sdk.api.core.http.connect', fake_connect,
         )
-        api_config.ssl_context = False
-        client = RestClient()
-        with client.open_ws('jobs/1/status-updates'):
+        return recorded
+
+    def test_builds_wss_url_with_token(self, api_config, connect_kwargs, proxy_env):
+        with RestClient().open_ws('jobs/1/status-updates'):
             pass
 
-        url = httpx.URL(recorded['url'])
+        url = httpx.URL(connect_kwargs['url'])
         assert url.scheme == 'wss'
         assert url.host == 'api.test'
         assert url.path == '/jobs/1/status-updates'
         assert url.params[RestClient.API_KEY_HEADER] == 'test-token'
-        assert recorded['kwargs']['proxy_ssl'] is False
+        # proxy_ssl secures the hop to a proxy, not the server, and rejects
+        # http:// proxies taken from the environment.
+        assert 'proxy_ssl' not in connect_kwargs['kwargs']
+
+    def test_default_ssl_uses_websockets_default(self, api_config, connect_kwargs):
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        assert connect_kwargs['kwargs']['ssl'] is None
+
+    def test_disabled_ssl_skips_verification(self, api_config, connect_kwargs):
+        api_config.ssl_context = False
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        context = connect_kwargs['kwargs']['ssl']
+        assert isinstance(context, ssl.SSLContext)
+        assert context.verify_mode == ssl.CERT_NONE
+        assert context.check_hostname is False
+
+    def test_ssl_context_is_built_once_per_setting(
+        self, api_config, connect_kwargs, monkeypatch,
+    ):
+        built = []
+        create = ssl.create_default_context
+
+        def counting_create(*args, **kwargs):
+            built.append(args or kwargs)
+            return create(*args, **kwargs)
+
+        monkeypatch.setattr(ssl, 'create_default_context', counting_create)
+        api_config.ssl_context = False
+        client = RestClient()
+        for _ in range(3):
+            with client.open_ws('jobs/1/status-updates'):
+                pass
+        assert len(built) == 1
+        first = connect_kwargs['kwargs']['ssl']
+
+        api_config.ssl_context = True
+        with client.open_ws('jobs/1/status-updates'):
+            pass
+        assert connect_kwargs['kwargs']['ssl'] is None
+        assert first.verify_mode == ssl.CERT_NONE
+
+    def test_ca_directory_is_a_capath(self, api_config, connect_kwargs, tmp_path):
+        api_config.ssl_context = str(tmp_path)
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        assert isinstance(connect_kwargs['kwargs']['ssl'], ssl.SSLContext)
+
+    def test_open_timeout_is_forwarded(self, api_config, connect_kwargs):
+        with RestClient().open_ws('jobs/1/status-updates', open_timeout=3.5):
+            pass
+        assert connect_kwargs['kwargs']['open_timeout'] == 3.5
+
+    def test_custom_ssl_context_is_used(self, api_config, connect_kwargs):
+        context = ssl.create_default_context()
+        api_config.ssl_context = context
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        assert connect_kwargs['kwargs']['ssl'] is context
+
+    @pytest.fixture
+    def proxy_env(self, monkeypatch):
+        for var in ('NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy',
+                    'WSS_PROXY', 'wss_proxy', 'SOCKS_PROXY', 'socks_proxy',
+                    'HTTPS_PROXY', 'https_proxy'):
+            monkeypatch.delenv(var, raising=False)
+
+        def set_proxy(url):
+            monkeypatch.setenv('https_proxy', url)
+
+        return set_proxy
+
+    @pytest.mark.skipif(http.get_proxy is None, reason='websockets < 15 has no proxy support')
+    def test_https_proxy_uses_configured_ssl(self, api_config, connect_kwargs, proxy_env):
+        proxy_env('https://proxy.corp:443')
+        context = ssl.create_default_context()
+        api_config.ssl_context = context
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        assert connect_kwargs['kwargs']['proxy_ssl'] is context
+
+    def test_http_proxy_gets_no_proxy_ssl(self, api_config, connect_kwargs, proxy_env):
+        # websockets rejects proxy_ssl for an http:// proxy.
+        proxy_env('http://proxy.corp:3128')
+        api_config.ssl_context = ssl.create_default_context()
+        with RestClient().open_ws('jobs/1/status-updates'):
+            pass
+        assert 'proxy_ssl' not in connect_kwargs['kwargs']
