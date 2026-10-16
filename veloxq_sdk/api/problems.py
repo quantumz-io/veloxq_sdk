@@ -1558,7 +1558,10 @@ class File(BaseModel):
         bias_arr = bias_vals.astype(shared_dtype)
 
         # Convert labels to array of strings for HDF5 compatibility
-        labels = np.fromiter(map(str, biases_dict.keys()), dtype=np.dtype("T"))
+        labels = np.array(
+            [str(label) for label in biases_dict],
+            dtype=h5py.string_dtype("utf-8"),
+        )
 
         return {
             "biases": bias_arr,

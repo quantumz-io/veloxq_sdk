@@ -300,6 +300,8 @@ class TestWriteIsingHdf5:
                 label.decode() if isinstance(label, bytes) else label
                 for label in ising['labels'].asstr()[:]
             ] == ['a', 'b']
+            label_type = h5py.check_string_dtype(ising['labels'].dtype)
+            assert (label_type.encoding, label_type.length) == ('utf-8', None)
             couplings = ising['couplings']
             assert couplings.attrs['type'] == 'SparseMatrixCSC'
             assert couplings['dims'][:].tolist() == [2, 2]
