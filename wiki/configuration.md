@@ -70,3 +70,29 @@ api_config.token = "NEW_TOKEN_VALUE"
 ```
 
 All subsequent calls to the VeloxQ API will reflect this change.
+
+## Configuration Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `url` | `VELOXQ_API_URL` or `https://api.veloxq.com` | Base URL of the API. |
+| `token` | `VELOX_TOKEN` | API token. |
+| `ssl_context` | `True` | TLS certificate verification, see below. |
+| `max_single_upload_size` | 64 MB | Files larger than this, in bytes, are uploaded in parts. |
+| `multipart_upload_chunk_size` | 32 MB | Part size in bytes for multipart uploads. At least 16 MB. |
+| `multipart_upload_thread_count` | number of CPUs | Threads used for multipart uploads. |
+
+`ssl_context` applies to the HTTP requests and to the WebSocket connection that streams job updates. It accepts:
+
+- `True`: verify certificates with the default CA bundle.
+- `False`: disable certificate verification.
+- an `ssl.SSLContext`, the preferred way to trust a custom CA.
+- a path to a CA bundle file or to a directory of CA certificates. httpx emits a `DeprecationWarning` for this form.
+
+```python
+import ssl
+from veloxq_sdk.config import VeloxQAPIConfig
+
+config = VeloxQAPIConfig.instance()
+config.ssl_context = ssl.create_default_context(cafile="/etc/ssl/certs/company-ca.pem")
+```
