@@ -4,7 +4,7 @@
 
 When a job completes, the `job.result` property returns a `VeloxSampleSet` object, which inherits all implementations from dimod's `SampleSet` class. A `SampleSet` object contains the samples and associated data, such as energies, variable values, and per-sample data.
 
-`job.result_available` tells whether the job saved a result. A completed job always has one. A canceled job has one when it was canceled while the solver ran: the samples found up to that point are saved. It is `None` when the platform does not report it, and then only a completed job counts as having a result. Reading `job.result` from a job without a result raises `RuntimeError`.
+`job.result_available` tells whether the job saved a result. A completed job always has one. A canceled job has one when it was canceled while the solver ran: the samples found up to that point are saved. It is `None` when the platform does not report it, and then only a completed job counts as having a result. Reading `job.result` from a job without a result raises `RuntimeError`. The error message gives the job status and the platform's last status message for the job.
 
 The columns follow the variable order of the submitted model, which is the order of `dimod.BinaryQuadraticModel(biases, couplings)` for the same inputs and `bqm.variables` for a BQM. They are labelled with the model labels as strings, or by column index when the solver writes no labels. Relabel them by position to get the model's own labels back, for example to pass a result as `init_state`:
 
