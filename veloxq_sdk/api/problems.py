@@ -89,7 +89,7 @@ if t.TYPE_CHECKING:
         rows: np.ndarray[tuple[int], np.dtype[np.integer]]
         cols: np.ndarray[tuple[int], np.dtype[np.integer]]
         values: np.ndarray[tuple[int], np.dtype[np.number]]
-        labels: np.ndarray[tuple[int], np.dtype[np.str_]]
+        labels: np.ndarray[tuple[int], np.dtype[np.object_]]
         variables: list[VariableType]
         idx_dtype: np.dtype[np.integer]
         size: int
