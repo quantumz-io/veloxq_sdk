@@ -22,13 +22,14 @@ A `Problem` groups related files and can be created or retrieved by name:
        print(p.id, p.name)
    ```
 
-3. **Access the default "undefined" `Problem`:**
+3. **List the files of a `Problem`:**
 
    ```python
-   default_problem = Problem.undefined()
-   files = Problem.get_files(name="big_test", limit=5)  # Get files associated with problem
+   files = my_problem.get_files(name="big_test", limit=5)  # Filter files containing name
    print(files)
    ```
+
+A file created without a `problem` is temporary. It is not attached to any problem, its `problem_id` is `None`, and `file.is_temporary` is `True`. The server deletes temporary files after its retention period.
 
 ## 2. Creating Files from Different Sources
 
@@ -49,7 +50,7 @@ from veloxq_sdk import File
 file_obj = File.from_instance(
     "path/to/local_data.h5",  # Other formats also supported e.g., .csv, .mtx, .dat, .csv
     name="my_data.h5",        # Optional; defaults to the file’s basename
-    problem=my_problem,        # Optional; defaults to Problem.undefined()
+    problem=my_problem,        # Optional; without it the file is temporary
     force=True                # Overwrite if a file with the same name exists
 )
 ```
@@ -421,7 +422,7 @@ file_obj = File.from_instance(
     "path/to/local_data.csv",
     problem=my_problem
 )
-assert file_obj.problem.id == my_problem.id
+assert file_obj.problem_id == my_problem.id
 ```
 
 Or alternately:
@@ -436,7 +437,7 @@ file_obj = my_problem.new_file(
 with open("big_ising.h5", "rb") as f:
     file_obj.upload(f)
 
-assert file_obj.problem.id == my_problem.id
+assert file_obj.problem_id == my_problem.id
 ```
 
 This ensures that retrieving files for "Experiment_Batch5" will include "local_data.csv".
@@ -449,7 +450,7 @@ This ensures that retrieving files for "Experiment_Batch5" will include "local_d
    # Returns a list of matching files (max=5 in this example)
    file_list = File.get_files(name="my_data.csv", limit=5)
    for f in file_list:
-       print(f.id, f.name, f.status, f.problem.name)
+       print(f.id, f.name, f.status, f.problem_id)
    ```
 
 2. **Download the file content:**
