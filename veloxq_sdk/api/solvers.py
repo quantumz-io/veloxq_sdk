@@ -31,6 +31,7 @@ from veloxq_sdk.api.backends import BaseBackend, VeloxQH100_1
 from veloxq_sdk.api.core.base import BaseModel
 from veloxq_sdk.api.jobs import Job
 from veloxq_sdk.api.problems import File, Problem
+import contextlib
 
 if t.TYPE_CHECKING:
     from veloxq_sdk.api.jobs import VeloxSampleSet
@@ -201,7 +202,12 @@ class BaseSolver(BaseModel):
             force=force,
         )
         job = self.submit(file)
-        job.wait_for_completion()
+        try:
+            job.wait_for_completion()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                job.cancel()  # Best effort to cancel the job if waiting fails
+            raise
         return job.result
 
     def submit(self, file: File) -> Job:
