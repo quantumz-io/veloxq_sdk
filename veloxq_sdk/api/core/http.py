@@ -18,6 +18,7 @@ import os
 import ssl
 import typing as t
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 
 import httpx
 from websockets.sync.client import ClientConnection, connect
@@ -30,30 +31,77 @@ except ImportError:  # websockets 15 keeps them in websockets.uri
 
 from veloxq_sdk.config import VeloxQAPIConfig
 
+_context_access_token: ContextVar[t.Optional[str]] = ContextVar('veloxq_access_token', default=None)
+
+
+@contextmanager
+def use_access_token(token: str) -> t.Iterator[None]:
+    """Send ``token`` as the bearer credential for API calls made in this context.
+
+    Replaces the configured API key for the current thread or task, so a server
+    acting for several users can share one client. Worker threads see it when
+    started with the context copied, same as ``asyncio.to_thread`` and
+    ``anyio.to_thread.run_sync``.
+    """
+    if not isinstance(token, str) or not token:
+        msg = 'access token must be a non-empty string'
+        raise ValueError(msg)
+    reset = _context_access_token.set(token)
+    try:
+        yield
+    finally:
+        _context_access_token.reset(reset)
+
 
 class RestClient(httpx.Client):
     """A custom HTTP client for VeloxQ API interactions."""
 
     API_KEY_HEADER = 'x-veloxq-auth-key'
+    AUTHORIZATION_HEADER = 'Authorization'
 
     def __init__(self) -> None:
         config = VeloxQAPIConfig.instance()
         verify = _ssl_verify(config.ssl_context)
         super().__init__(verify=verify)
-        config.observe(self._update_token, names='token')
+        config.observe(self._update_api_key, names='token')
         config.observe(self._update_url, names='url')
         config.observe(self._update_ssl_context, names='ssl_context')
-        self.headers[self.API_KEY_HEADER] = config.token
+        self._set_api_key(config.token)
         self.base_url = config.url
         self.event_hooks = {
+            'request': [self._apply_context_access_token],
             'response': [self.update_response_reason],
         }
         self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
         self._ws_ssl = _websocket_ssl(verify)
 
-    def _update_token(self, change: dict) -> None:
-        """Update the API token in the headers."""
-        self.headers[self.API_KEY_HEADER] = change['new']
+    def _update_api_key(self, change: dict) -> None:
+        self._set_api_key(change['new'])
+
+    def _set_api_key(self, api_key: str) -> None:
+        self.headers.pop(self.API_KEY_HEADER, None)
+        if api_key:
+            self.headers[self.API_KEY_HEADER] = api_key
+
+    def _apply_context_access_token(self, request: httpx.Request) -> None:
+        token = _context_access_token.get()
+        if token is None:
+            return
+        base = self.base_url
+        if (request.url.scheme, request.url.host, request.url.port) != (base.scheme, base.host, base.port):
+            return
+        request.headers.pop(self.API_KEY_HEADER, None)
+        request.headers[self.AUTHORIZATION_HEADER] = f'Bearer {token}'
+
+    def _credential_header(self) -> dict[str, str]:
+        """Return the one credential header the client is sending."""
+        if token := _context_access_token.get():
+            return {self.AUTHORIZATION_HEADER: f'Bearer {token}'}
+        if api_key := self.headers.get(self.API_KEY_HEADER):
+            return {self.API_KEY_HEADER: api_key}
+        msg = ('No credentials configured. Set `token` (API key) in the '
+               'configuration or wrap the call in `use_access_token`.')
+        raise ValueError(msg)
 
     def _update_url(self, change: dict) -> None:
         """Update the base URL in the client."""
@@ -83,17 +131,8 @@ class RestClient(httpx.Client):
             connect: A WebSocket connection object.
 
         """
-        token = self.headers.get(self.API_KEY_HEADER)
-        if not token:
-            msg = (f'Missing required header: {self.API_KEY_HEADER}.'
-                   ' Make sure that the token is set in the configuration.')
-            raise ValueError(msg)
-        url = self._merge_url(path).copy_with(
-            scheme='wss',
-            params={
-               self.API_KEY_HEADER: token,
-            }
-        )
+        scheme = 'wss' if self.base_url.scheme == 'https' else 'ws'
+        url = self._merge_url(path).copy_with(scheme=scheme)
         kwargs = {}
         if _uses_https_proxy(str(url)):
             kwargs['proxy_ssl'] = self._ws_ssl
@@ -101,6 +140,7 @@ class RestClient(httpx.Client):
             str(url),
             ssl=self._ws_ssl,
             open_timeout=open_timeout,
+            additional_headers=self._credential_header(),
             **kwargs,
         ) as ws:
             yield ws  # type: ignore[return]

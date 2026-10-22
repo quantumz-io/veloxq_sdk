@@ -14,13 +14,14 @@
 """Atomic tests for veloxq_sdk.api.core.http."""
 
 import ssl
+import threading
 from contextlib import contextmanager
 
 import certifi
 import httpx
 import pytest
 
-from veloxq_sdk.api.core.http import ClientMixin, RestClient
+from veloxq_sdk.api.core.http import ClientMixin, RestClient, use_access_token
 
 
 def _response(status_code: int, **kwargs) -> httpx.Response:
@@ -41,6 +42,12 @@ class TestRestClient:
         client = RestClient()
         api_config.token = 'rotated'
         assert client.headers[RestClient.API_KEY_HEADER] == 'rotated'
+
+    def test_no_credentials_sends_neither_header(self, api_config):
+        api_config.token = ''
+        client = RestClient()
+        assert RestClient.API_KEY_HEADER not in client.headers
+        assert RestClient.AUTHORIZATION_HEADER not in client.headers
 
     def test_url_change_updates_base_url(self, api_config):
         client = RestClient()
@@ -94,10 +101,10 @@ class TestUpdateResponseReason:
 
 
 class TestOpenWs:
-    def test_missing_token_raises(self, api_config):
+    def test_missing_credentials_raise(self, api_config):
         api_config.token = ''
         client = RestClient()
-        with pytest.raises(ValueError, match=RestClient.API_KEY_HEADER):
+        with pytest.raises(ValueError, match='No credentials configured'):
             with client.open_ws('jobs/1/status-updates'):
                 pass
 
@@ -116,7 +123,7 @@ class TestOpenWs:
         )
         return recorded
 
-    def test_builds_wss_url_with_token(self, api_config, connect_kwargs, proxy_env):
+    def test_builds_wss_url_with_token_header(self, api_config, connect_kwargs, proxy_env):
         with RestClient().open_ws('jobs/1/status-updates'):
             pass
 
@@ -124,7 +131,9 @@ class TestOpenWs:
         assert url.scheme == 'wss'
         assert url.host == 'api.test'
         assert url.path == '/jobs/1/status-updates'
-        assert url.params[RestClient.API_KEY_HEADER] == 'test-token'
+        assert not url.params
+        headers = connect_kwargs['kwargs']['additional_headers']
+        assert headers == {RestClient.API_KEY_HEADER: 'test-token'}
         # proxy_ssl secures the hop to a proxy, not the server, and rejects
         # http:// proxies taken from the environment.
         assert 'proxy_ssl' not in connect_kwargs['kwargs']
@@ -213,3 +222,101 @@ class TestOpenWs:
         with RestClient().open_ws('jobs/1/status-updates'):
             pass
         assert 'proxy_ssl' not in connect_kwargs['kwargs']
+
+
+class TestWebsocketScheme:
+    def test_plain_http_api_uses_ws(self, api_config, monkeypatch):
+        api_config.url = 'http://localhost:8000'
+        seen: list[str] = []
+
+        class _Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        monkeypatch.setattr(
+            'veloxq_sdk.api.core.http.connect',
+            lambda url, **kw: (seen.append(url), _Conn())[1],
+        )
+        with ClientMixin.http.open_ws('jobs/1/status-updates'):
+            pass
+        assert seen == ['ws://localhost:8000/jobs/1/status-updates']
+
+
+class TestUseAccessToken:
+    def test_requests_in_the_context_carry_its_bearer_only(self, api_config, mock_api):
+        mock_api.add('GET', '/jobs', json={'data': []})
+        with use_access_token('eyJ.user'):
+            ClientMixin.http.get('jobs')
+        sent = mock_api.calls('GET', '/jobs')[0].headers
+        assert sent[RestClient.AUTHORIZATION_HEADER] == 'Bearer eyJ.user'
+        assert RestClient.API_KEY_HEADER not in sent
+
+    def test_requests_after_the_context_use_the_configuration(self, api_config, mock_api):
+        mock_api.add('GET', '/jobs', json={'data': []})
+        with use_access_token('eyJ.user'):
+            pass
+        ClientMixin.http.get('jobs')
+        sent = mock_api.calls('GET', '/jobs')[0].headers
+        assert sent[RestClient.API_KEY_HEADER] == 'test-token'
+        assert RestClient.AUTHORIZATION_HEADER not in sent
+
+    def test_other_hosts_never_receive_the_bearer(self, api_config, mock_api):
+        mock_api.add('GET', '/blob', content=b'x')
+        with use_access_token('eyJ.user'):
+            ClientMixin.http.get('https://blob.test/blob')
+        assert RestClient.AUTHORIZATION_HEADER not in mock_api.calls('GET', '/blob')[0].headers
+
+    def test_threads_keep_their_own_token(self, api_config, mock_api):
+        mock_api.add('GET', '/jobs', json={'data': []})
+        barrier = threading.Barrier(2)
+
+        def call(token):
+            with use_access_token(token):
+                barrier.wait()
+                ClientMixin.http.get('jobs', params={'who': token})
+
+        threads = [threading.Thread(target=call, args=(f'eyJ.{k}',)) for k in 'ab']
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        for request in mock_api.calls('GET', '/jobs'):
+            who = request.url.params['who']
+            assert request.headers[RestClient.AUTHORIZATION_HEADER] == f'Bearer {who}'
+
+    def test_websocket_uses_the_context_bearer(self, api_config, monkeypatch):
+        seen = {}
+
+        @contextmanager
+        def fake_connect(url, **kwargs):
+            seen.update(kwargs)
+            yield object()
+
+        monkeypatch.setattr('veloxq_sdk.api.core.http.connect', fake_connect)
+        with use_access_token('eyJ.user'), ClientMixin.http.open_ws('jobs/1/status-updates'):
+            pass
+        assert seen['additional_headers'] == {RestClient.AUTHORIZATION_HEADER: 'Bearer eyJ.user'}
+
+    def test_websocket_without_any_credential_uses_the_context_bearer(self, api_config, monkeypatch):
+        api_config.token = ''
+        seen = {}
+
+        @contextmanager
+        def fake_connect(url, **kwargs):
+            seen['url'] = url
+            seen.update(kwargs)
+            yield object()
+
+        monkeypatch.setattr('veloxq_sdk.api.core.http.connect', fake_connect)
+        with use_access_token('eyJ.user'), ClientMixin.http.open_ws('jobs/1/status-updates'):
+            pass
+        assert not httpx.URL(seen['url']).params
+        assert seen['additional_headers'] == {RestClient.AUTHORIZATION_HEADER: 'Bearer eyJ.user'}
+
+    def test_empty_token_is_refused(self):
+        with pytest.raises(ValueError, match='access token must be a non-empty string'):
+            with use_access_token(''):
+                pass

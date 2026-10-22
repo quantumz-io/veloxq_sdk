@@ -105,6 +105,9 @@ class TestLoadConfig:
         assert config.url == 'https://env.test'
         assert config.token == 'env-token'
 
+    def test_access_token_is_not_configurable(self):
+        assert not VeloxQAPIConfig.instance().has_trait('access_token')
+
     def test_unsupported_type_raises(self):
         with pytest.raises(TypeError, match='Unsupported config type'):
             load_config(42)
