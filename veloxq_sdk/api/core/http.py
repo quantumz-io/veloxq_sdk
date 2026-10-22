@@ -74,6 +74,14 @@ class RestClient(httpx.Client):
         }
         self.timeout = httpx.Timeout(connect=5, read=30, write=15, pool=10)
         self._ws_ssl = _websocket_ssl(verify)
+        self.storage = httpx.Client(verify=verify, timeout=self.timeout)
+        """Client for signed storage URLs. It carries no credential: the
+        signature in the URL is the only authorization those hosts need."""
+
+    def close(self) -> None:
+        """Close this client and the storage client."""
+        self.storage.close()
+        super().close()
 
     def _update_api_key(self, change: dict) -> None:
         self._set_api_key(change['new'])
@@ -112,6 +120,7 @@ class RestClient(httpx.Client):
         verify = _ssl_verify(change['new'])
         self._ws_ssl = _websocket_ssl(verify)
         self.verify = verify
+        self.storage.verify = verify
 
     @contextmanager
     def open_ws(

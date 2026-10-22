@@ -224,6 +224,22 @@ class TestOpenWs:
         assert 'proxy_ssl' not in connect_kwargs['kwargs']
 
 
+class TestStorageClient:
+    def test_signed_url_requests_carry_no_credential(self, api_config, mock_api):
+        mock_api.add('GET', '/blob', content=b'x')
+        with use_access_token('eyJ.user'), ClientMixin.http.storage.stream('GET', 'https://blob.test/blob') as r:
+            r.read()
+        sent = mock_api.calls('GET', '/blob')[0].headers
+        assert RestClient.API_KEY_HEADER not in sent
+        assert RestClient.AUTHORIZATION_HEADER not in sent
+
+    def test_api_requests_still_carry_the_credential(self, api_config, mock_api):
+        mock_api.add('GET', '/jobs', json={'data': []})
+        ClientMixin.http.get('jobs')
+        sent = mock_api.calls('GET', '/jobs')[0].headers
+        assert sent[RestClient.API_KEY_HEADER] == 'test-token'
+
+
 class TestWebsocketScheme:
     def test_plain_http_api_uses_ws(self, api_config, monkeypatch):
         api_config.url = 'http://localhost:8000'

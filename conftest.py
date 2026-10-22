@@ -158,6 +158,7 @@ def mock_api(api_config: VeloxQAPIConfig) -> MockAPI:
     api = MockAPI()
     client = ClientMixin.http
     client._transport = httpx.MockTransport(api)
+    client.storage._transport = httpx.MockTransport(api)
     return api
 
 

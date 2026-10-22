@@ -459,7 +459,7 @@ class File(BaseModel):
         else:
             download_url = self.http.get(f"problems/{self.problem_id}/files/{self.id}")
         download_url.raise_for_status()
-        with self.http.stream(
+        with self.http.storage.stream(
             "GET", download_url.text.strip("'").strip('"')
         ) as response:
             response.raise_for_status()

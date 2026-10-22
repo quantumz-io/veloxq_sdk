@@ -480,7 +480,7 @@ class Job(BaseModel):
 
         download_url = self.http.get(f'jobs/{self.id}/result')
         download_url.raise_for_status()
-        with self.http.stream('GET', download_url.text.strip("'").strip('"')) as response:
+        with self.http.storage.stream('GET', download_url.text.strip("'").strip('"')) as response:
             response.raise_for_status()
             for chunk in response.iter_bytes(chunk_size):
                 file.write(chunk)
