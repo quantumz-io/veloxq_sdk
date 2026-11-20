@@ -334,6 +334,27 @@ class TestStatusReconnect:
         make_job().wait_for_completion()
         assert sleeps == [1.0, 1.0]
 
+    def test_gives_up_after_reconnect_timeout(self, api_config, ws_factory, sleeps):
+        cause = OSError('Network is unreachable')
+        ws_factory(cause)
+        with pytest.raises(ConnectionError, match="Job.from_id\\('j1'\\)") as info:
+            make_job().wait_for_completion(reconnect_timeout=0)
+        assert info.value.__cause__ is cause
+        assert sleeps == []
+
+    def test_server_that_closes_without_messages_exhausts_reconnect_timeout(
+        self, api_config, ws_factory, monkeypatch,
+    ):
+        from conftest import FakeWS
+
+        clock = [0.0]
+        monkeypatch.setattr(jobs_module.time, 'monotonic', lambda: clock[0])
+        monkeypatch.setattr(jobs_module.time, 'sleep', lambda s: clock.__setitem__(0, clock[0] + s))
+        paths = ws_factory(*(FakeWS([ping_timeout()]) for _ in range(20)))
+        with pytest.raises(ConnectionError, match='within 10 seconds'):
+            make_job().wait_for_completion(reconnect_timeout=10)
+        assert len(paths) == 5  # opened at t = 0, 1, 3, 7, 15
+
     @pytest.mark.parametrize('status', [401, 403, 404])
     def test_rejected_handshake_is_not_retried(self, api_config, ws_factory, sleeps, status):
         rejection = handshake_rejected(status)

@@ -340,7 +340,12 @@ class Job(BaseModel):
         default=None,
     )
 
-    def get_job_updates(self, timeout: float | None = None) -> t.Generator[JobUpdate, None, None]:
+    def get_job_updates(
+        self,
+        timeout: float | None = None,
+        *,
+        reconnect_timeout: float | None = 300,
+    ) -> t.Generator[JobUpdate, None, None]:
         """Get real-time updates for the job.
 
         A dropped status connection is reopened. The server sends the current
@@ -349,12 +354,17 @@ class Job(BaseModel):
         Args:
             timeout (float | None): Maximum time in seconds to wait for the job
                 to finish. If None, wait indefinitely.
+            reconnect_timeout (float | None): Maximum time in seconds without
+                a working status connection before giving up. If None, keep
+                reconnecting indefinitely.
 
         Raises:
             TimeoutError: If the job does not finish by `timeout` seconds.
+            ConnectionError: If the status connection stays down for
+                `reconnect_timeout` seconds. The job may still be running.
 
         """
-        with closing(self._status_messages(timeout)) as messages:
+        with closing(self._status_messages(timeout, reconnect_timeout)) as messages:
             for message in messages:
                 update = JobUpdate.model_validate_json(message)
                 self.status = update.status
@@ -367,7 +377,13 @@ class Job(BaseModel):
                 if update.finished:
                     return
 
-    def wait_for_completion(self, timeout: float | None = None, *, refresh: bool = False) -> None:
+    def wait_for_completion(
+        self,
+        timeout: float | None = None,
+        *,
+        refresh: bool = False,
+        reconnect_timeout: float | None = 300,
+    ) -> None:
         """Wait for the job to complete.
 
         A dropped status connection is reopened. The server sends the current
@@ -378,9 +394,14 @@ class Job(BaseModel):
                                     If None, wait indefinitely.
             refresh (bool): If True, automatically refresh the job data after completion
                             with the latest data from the API. Default is False.
+            reconnect_timeout (float | None): Maximum time in seconds without
+                a working status connection before giving up. If None, keep
+                reconnecting indefinitely.
 
         Raises:
             TimeoutError: If the job does not complete by 'timeout' seconds.
+            ConnectionError: If the status connection stays down for
+                `reconnect_timeout` seconds. The job may still be running.
 
         """
         terminal_statuses = {
@@ -391,7 +412,7 @@ class Job(BaseModel):
         if self.status in terminal_statuses:
             return
         status_update = {}
-        with closing(self._status_messages(timeout)) as messages:
+        with closing(self._status_messages(timeout, reconnect_timeout)) as messages:
             for message in messages:
                 status_update = json.loads(message)
                 if status_update['finished']:
@@ -408,9 +429,17 @@ class Job(BaseModel):
     def _status_messages(
         self,
         timeout: float | None,
+        reconnect_timeout: float | None,
     ) -> t.Generator[bytes, None, None]:
-        """Yield raw status-update messages, reopening the socket when it drops."""
-        deadline = None if timeout is None else time.monotonic() + timeout
+        """Yield raw status-update messages, reopening the socket when it drops.
+
+        The connection counts as down from the last received message, so a
+        server that accepts the socket and closes it without sending anything
+        still exhausts `reconnect_timeout`.
+        """
+        start = time.monotonic()
+        deadline = None if timeout is None else start + timeout
+        last_message = start
         delay = _RECONNECT_INITIAL_DELAY
         while True:
             try:
@@ -425,9 +454,19 @@ class Job(BaseModel):
                             message = ws.recv(remaining, decode=False)
                         except TimeoutError:
                             break
+                        last_message = time.monotonic()
                         delay = _RECONNECT_INITIAL_DELAY
                         yield message
             except (ConnectionClosed, InvalidMessage, OSError) as err:
+                down_for = time.monotonic() - last_message
+                if reconnect_timeout is not None and down_for >= reconnect_timeout:
+                    msg = (
+                        f'Lost the status connection for Job {self.id} and could not '
+                        f'reconnect within {reconnect_timeout} seconds. The job may '
+                        f'still be running. Resume with '
+                        f'Job.from_id({self.id!r}).wait_for_completion().'
+                    )
+                    raise ConnectionError(msg) from err
                 wait = delay
                 if deadline is not None:
                     wait = min(wait, max(deadline - time.monotonic(), 0))
