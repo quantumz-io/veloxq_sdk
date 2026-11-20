@@ -28,6 +28,7 @@ from contextlib import closing
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
+from http import HTTPStatus
 from os import PathLike
 from pathlib import Path
 from shutil import copyfile
@@ -39,7 +40,7 @@ from dateutil.parser import isoparse
 from dimod.sampleset import SampleSet
 from dimod.vartypes import as_vartype
 from pydantic import BeforeValidator, Field
-from websockets.exceptions import ConnectionClosed, InvalidMessage
+from websockets.exceptions import ConnectionClosed, InvalidMessage, InvalidStatus
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
 from veloxq_sdk.api.problems import File
@@ -457,7 +458,9 @@ class Job(BaseModel):
                         last_message = time.monotonic()
                         delay = _RECONNECT_INITIAL_DELAY
                         yield message
-            except (ConnectionClosed, InvalidMessage, OSError) as err:
+            except (ConnectionClosed, InvalidMessage, InvalidStatus, OSError) as err:
+                if not _is_transient(err):
+                    raise
                 down_for = time.monotonic() - last_message
                 if reconnect_timeout is not None and down_for >= reconnect_timeout:
                     msg = (
@@ -663,6 +666,21 @@ class Job(BaseModel):
         finally:
             part_path.unlink(missing_ok=True)
         return temp_file
+
+
+def _is_transient(err: Exception) -> bool:
+    """Whether reopening the status socket may succeed after `err`.
+
+    A rejected handshake is retried only for server-side and rate-limit
+    statuses. Authentication and missing-job rejections are final.
+    """
+    if isinstance(err, InvalidStatus):
+        status = err.response.status_code
+        return (
+            status >= HTTPStatus.INTERNAL_SERVER_ERROR
+            or status == HTTPStatus.TOO_MANY_REQUESTS
+        )
+    return True
 
 
 class VeloxSampleSet(SampleSet):
