@@ -229,6 +229,47 @@ class TestGetJobUpdates:
             list(job.get_job_updates(timeout=0.01))
 
 
+class TestStatusStream:
+    def test_recv_waits_at_most_the_remaining_timeout(self, api_config, ws_factory):
+        from conftest import FakeWS
+
+        ws = FakeWS([TimeoutError()])
+        ws_factory(ws)
+        with pytest.raises(TimeoutError, match='timed out after 5 seconds'):
+            make_job().wait_for_completion(timeout=5)
+        (recv_timeout,) = ws.recv_timeouts
+        assert 0 < recv_timeout <= 5
+
+    def test_recv_blocks_without_timeout(self, api_config, ws_factory):
+        from conftest import FakeWS
+
+        ws = FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()])
+        ws_factory(ws)
+        make_job().wait_for_completion()
+        assert ws.recv_timeouts == [None]
+
+    def test_closing_updates_closes_the_socket(self, api_config, ws_factory, monkeypatch):
+        from contextlib import contextmanager
+
+        from conftest import FakeWS
+        from veloxq_sdk.api.core.http import RestClient
+
+        closed = []
+
+        @contextmanager
+        def tracking_open_ws(_self, path):
+            try:
+                yield FakeWS([json.dumps(update_json(finished=False)).encode()])
+            finally:
+                closed.append(path)
+
+        monkeypatch.setattr(RestClient, 'open_ws', tracking_open_ws)
+        updates = make_job().get_job_updates()
+        next(updates)
+        updates.close()
+        assert closed == ['jobs/j1/status-updates']
+
+
 class TestJobEndpoints:
     def test_get_job_logs_params_and_parsing(self, mock_api):
         mock_api.add('GET', '/jobs/j1/logs', json=[

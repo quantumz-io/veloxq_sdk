@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import time
 import typing as t
+from contextlib import closing
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
@@ -333,19 +334,19 @@ class Job(BaseModel):
     )
 
     def get_job_updates(self, timeout: float | None = None) -> t.Generator[JobUpdate, None, None]:
-        """Get real-time updates for the job."""
-        start_time = time.monotonic()
-        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
-            waiting = True
-            while waiting:
-                if timeout and (time.monotonic() - start_time) > timeout:
-                    msg = (
-                        f'Waiting for Job {self.id} completion timed '
-                        f'out after {timeout} seconds.'
-                    )
-                    raise TimeoutError(msg)
-                update = JobUpdate.model_validate_json(ws.recv(decode=False))
-                waiting = not update.finished
+        """Get real-time updates for the job.
+
+        Args:
+            timeout (float | None): Maximum time in seconds to wait for the job
+                to finish. If None, wait indefinitely.
+
+        Raises:
+            TimeoutError: If the job does not finish by `timeout` seconds.
+
+        """
+        with closing(self._status_messages(timeout)) as messages:
+            for message in messages:
+                update = JobUpdate.model_validate_json(message)
                 self.status = update.status
                 self.status_message = update.status_message
                 self.result_available = update.result_available
@@ -353,6 +354,8 @@ class Job(BaseModel):
                 self.statistics = update.statistics
                 self.timeline = update.timeline
                 yield update
+                if update.finished:
+                    return
 
     def wait_for_completion(self, timeout: float | None = None, *, refresh: bool = False) -> None:
         """Wait for the job to complete.
@@ -374,19 +377,12 @@ class Job(BaseModel):
         }
         if self.status in terminal_statuses:
             return
-        start_time = time.monotonic()
         status_update = {}
-        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
-            waiting = True
-            while waiting:
-                if timeout and (time.monotonic() - start_time) > timeout:
-                    msg = (
-                        f'Waiting for Job {self.id} completion timed '
-                        f'out after {timeout} seconds.'
-                    )
-                    raise TimeoutError(msg)
-                status_update = json.loads(ws.recv(decode=False))
-                waiting = not status_update['finished']
+        with closing(self._status_messages(timeout)) as messages:
+            for message in messages:
+                status_update = json.loads(message)
+                if status_update['finished']:
+                    break
 
         self.status = status_update['status']
         self.result_available = status_update.get('resultAvailable')
@@ -395,6 +391,30 @@ class Job(BaseModel):
             self.timeline = JobTimelineValue.adapters.list.validate_python(status_update['timeline'])
             self.status_message = status_update.get('statusMessage')
             self.updated_at = isoparse(status_update['updatedAt'])
+
+    def _status_messages(
+        self,
+        timeout: float | None,
+    ) -> t.Generator[bytes, None, None]:
+        """Yield raw status-update messages until `timeout` expires."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
+            while True:
+                remaining = None
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    break
+                try:
+                    message = ws.recv(remaining, decode=False)
+                except TimeoutError:
+                    break
+                yield message
+        msg = (
+            f'Waiting for Job {self.id} completion timed '
+            f'out after {timeout} seconds.'
+        )
+        raise TimeoutError(msg)
 
     def get_job_logs(
         self,
