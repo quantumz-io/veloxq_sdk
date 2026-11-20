@@ -104,23 +104,29 @@ class MockAPI:
 class FakeWS:
     """Stand-in for a ``websockets`` client connection.
 
-    ``recv`` pops from ``recv_messages`` (a message may be a callable that
-    produces the payload, letting tests inject delays) and returns ``b'ack'``
-    once the queue is exhausted. ``send`` records every payload.
+    ``recv`` pops from ``recv_messages`` and returns ``b'ack'`` once the
+    queue is exhausted. A message may be a callable that produces the payload,
+    letting tests inject delays, or an exception instance, which ``recv``
+    raises. ``send`` records every payload and ``recv_timeouts`` every
+    ``timeout`` passed to ``recv``.
     """
 
     def __init__(self, recv_messages: t.Iterable[t.Any] = ()) -> None:
         self.sent: list[bytes] = []
         self.recv_calls = 0
+        self.recv_timeouts: list[t.Optional[float]] = []
         self._messages = list(recv_messages)
 
     def send(self, data: bytes) -> None:
         self.sent.append(data)
 
-    def recv(self, decode: bool = True) -> t.Any:  # noqa: FBT001, FBT002
+    def recv(self, timeout: t.Optional[float] = None, decode: bool = True) -> t.Any:  # noqa: FBT001, FBT002
         self.recv_calls += 1
+        self.recv_timeouts.append(timeout)
         if self._messages:
             message = self._messages.pop(0)
+            if isinstance(message, BaseException):
+                raise message
             return message() if callable(message) else message
         return b'ack'
 
@@ -170,18 +176,21 @@ def ws_factory(
 
     Returns an installer: ``paths = ws_factory(ws1, ws2, ...)``. Each call
     to ``open_ws`` records its path in ``paths`` and yields the next fake
-    connection.
+    connection, or raises it when it is an exception instance.
     """
     from veloxq_sdk.api.core.http import RestClient
 
-    def install(*connections: FakeWS) -> list[str]:
+    def install(*connections: t.Union[FakeWS, BaseException]) -> list[str]:
         queue = list(connections)
         opened_paths: list[str] = []
 
         @contextmanager
         def fake_open_ws(_self: RestClient, path: str) -> t.Iterator[FakeWS]:
             opened_paths.append(path)
-            yield queue.pop(0)
+            connection = queue.pop(0)
+            if isinstance(connection, BaseException):
+                raise connection
+            yield connection
 
         monkeypatch.setattr(RestClient, 'open_ws', fake_open_ws)
         return opened_paths
