@@ -32,12 +32,19 @@ from .test_problems import file_json
 
 
 class _FakeJob:
-    def __init__(self):
+    def __init__(self, wait_error=None):
         self.waited = False
+        self.canceled = False
         self.result = object()
+        self._wait_error = wait_error
 
     def wait_for_completion(self):
         self.waited = True
+        if self._wait_error is not None:
+            raise self._wait_error
+
+    def cancel(self):
+        self.canceled = True
 
 
 @pytest.fixture
@@ -138,3 +145,27 @@ class TestDefaults:
         assert dumped['num_rep'] == 2
         assert dumped['dt'] == 0.5
         assert 'discrete_version' in dumped
+
+
+class TestSampleWaitFailure:
+    @pytest.fixture
+    def submit_job(self, monkeypatch):
+        def install(job):
+            monkeypatch.setattr(File, 'from_instance', classmethod(lambda cls, instance, **kw: 'f'))
+            monkeypatch.setattr(BaseSolver, 'submit', lambda self, file: job)
+        return install
+
+    def test_lost_connection_keeps_job_running(self, submit_job):
+        job = _FakeJob(ConnectionError('lost'))
+        submit_job(job)
+        with pytest.raises(ConnectionError, match='lost'):
+            VeloxQSolver().sample('inst.h5')
+        assert not job.canceled
+
+    @pytest.mark.parametrize('error', [TimeoutError('slow'), KeyboardInterrupt()])
+    def test_other_wait_failures_cancel_job(self, submit_job, error):
+        job = _FakeJob(error)
+        submit_job(job)
+        with pytest.raises(type(error)):
+            VeloxQSolver().sample('inst.h5')
+        assert job.canceled
