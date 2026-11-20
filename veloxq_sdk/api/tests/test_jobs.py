@@ -21,7 +21,12 @@ import dimod
 import h5py
 import numpy as np
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.frames import Close
+from websockets.http11 import Response
 
+from veloxq_sdk.api import jobs as jobs_module
 from veloxq_sdk.api.jobs import (
     Job,
     JobLogsRow,
@@ -227,6 +232,179 @@ class TestGetJobUpdates:
         job = make_job()
         with pytest.raises(TimeoutError, match='timed out'):
             list(job.get_job_updates(timeout=0.01))
+
+
+class TestStatusStream:
+    def test_recv_waits_at_most_the_remaining_timeout(self, api_config, ws_factory):
+        from conftest import FakeWS
+
+        ws = FakeWS([TimeoutError()])
+        ws_factory(ws)
+        with pytest.raises(TimeoutError, match='timed out after 5 seconds'):
+            make_job().wait_for_completion(timeout=5)
+        (recv_timeout,) = ws.recv_timeouts
+        assert 0 < recv_timeout <= 5
+
+    def test_recv_blocks_without_timeout(self, api_config, ws_factory):
+        from conftest import FakeWS
+
+        ws = FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()])
+        ws_factory(ws)
+        make_job().wait_for_completion()
+        assert ws.recv_timeouts == [None]
+
+    def test_closing_updates_closes_the_socket(self, api_config, ws_factory, monkeypatch):
+        from contextlib import contextmanager
+
+        from conftest import FakeWS
+        from veloxq_sdk.api.core.http import RestClient
+
+        closed = []
+
+        @contextmanager
+        def tracking_open_ws(_self, path):
+            try:
+                yield FakeWS([json.dumps(update_json(finished=False)).encode()])
+            finally:
+                closed.append(path)
+
+        monkeypatch.setattr(RestClient, 'open_ws', tracking_open_ws)
+        updates = make_job().get_job_updates()
+        next(updates)
+        updates.close()
+        assert closed == ['jobs/j1/status-updates']
+
+
+def ping_timeout() -> ConnectionClosedError:
+    return ConnectionClosedError(
+        rcvd=None, sent=Close(1011, 'keepalive ping timeout'), rcvd_then_sent=None,
+    )
+
+
+def handshake_rejected(status: int) -> InvalidStatus:
+    return InvalidStatus(Response(status, 'rejected', Headers(), b''))
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record reconnect delays instead of sleeping."""
+    delays = []
+    monkeypatch.setattr(jobs_module.time, 'sleep', delays.append)
+    return delays
+
+
+class TestStatusReconnect:
+    def test_wait_reconnects_after_ping_timeout(self, api_config, ws_factory, sleeps, caplog):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        with caplog.at_level('WARNING', logger='veloxq_sdk.api.jobs'):
+            job.wait_for_completion()
+        assert job.status == 'completed'
+        assert paths == ['jobs/j1/status-updates'] * 2
+        assert sleeps == [1.0]
+        assert 'keepalive ping timeout' in caplog.text
+
+    def test_wait_retries_unreachable_server_with_backoff(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            OSError('Network is unreachable'),
+            TimeoutError('timed out during opening handshake'),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        job.wait_for_completion()
+        assert job.status == 'completed'
+        assert len(paths) == 3
+        assert sleeps == [1.0, 2.0]
+
+    def test_backoff_resets_after_a_message(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        ws_factory(
+            OSError('down'),
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        make_job().wait_for_completion()
+        assert sleeps == [1.0, 1.0]
+
+    def test_gives_up_after_reconnect_timeout(self, api_config, ws_factory, sleeps):
+        cause = OSError('Network is unreachable')
+        ws_factory(cause)
+        with pytest.raises(ConnectionError, match="Job.from_id\\('j1'\\)") as info:
+            make_job().wait_for_completion(reconnect_timeout=0)
+        assert info.value.__cause__ is cause
+        assert sleeps == []
+
+    def test_server_that_closes_without_messages_exhausts_reconnect_timeout(
+        self, api_config, ws_factory, monkeypatch,
+    ):
+        from conftest import FakeWS
+
+        clock = [0.0]
+        monkeypatch.setattr(jobs_module.time, 'monotonic', lambda: clock[0])
+        monkeypatch.setattr(jobs_module.time, 'sleep', lambda s: clock.__setitem__(0, clock[0] + s))
+        paths = ws_factory(*(FakeWS([ping_timeout()]) for _ in range(20)))
+        with pytest.raises(ConnectionError, match='within 10 seconds'):
+            make_job().wait_for_completion(reconnect_timeout=10)
+        assert len(paths) == 5  # opened at t = 0, 1, 3, 7, 15
+
+    @pytest.mark.parametrize('status', [401, 403, 404])
+    def test_rejected_handshake_is_not_retried(self, api_config, ws_factory, sleeps, status):
+        rejection = handshake_rejected(status)
+        paths = ws_factory(rejection)
+        with pytest.raises(InvalidStatus) as info:
+            make_job().wait_for_completion()
+        assert info.value is rejection
+        assert len(paths) == 1
+        assert sleeps == []
+
+    def test_timeout_bounds_reconnect_wait(self, api_config, ws_factory, monkeypatch):
+        clock = [0.0]
+        monkeypatch.setattr(jobs_module.time, 'monotonic', lambda: clock[0])
+        delays = []
+
+        def sleep(seconds):
+            delays.append(seconds)
+            clock[0] += seconds
+
+        monkeypatch.setattr(jobs_module.time, 'sleep', sleep)
+        ws_factory(*(OSError('down') for _ in range(10)))
+        with pytest.raises(TimeoutError, match='timed out after 2.5 seconds'):
+            make_job().wait_for_completion(timeout=2.5)
+        assert delays == [1.0, 1.5]
+
+    def test_updates_continue_across_reconnect(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        ws_factory(
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        updates = list(job.get_job_updates())
+        assert [u.finished for u in updates] == [False, True]
+        assert job.status == 'completed'
+
+    @pytest.mark.parametrize('status', [429, 500, 503])
+    def test_server_side_rejection_is_retried(self, api_config, ws_factory, sleeps, status):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            handshake_rejected(status),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        job.wait_for_completion()
+        assert job.status == 'completed'
+        assert len(paths) == 2
+        assert sleeps == [1.0]
 
 
 class TestJobEndpoints:

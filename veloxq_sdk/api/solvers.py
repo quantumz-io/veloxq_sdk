@@ -204,6 +204,8 @@ class BaseSolver(BaseModel):
         job = self.submit(file)
         try:
             job.wait_for_completion()
+        except ConnectionError:
+            raise
         except BaseException:
             with contextlib.suppress(Exception):
                 job.cancel()  # Best effort to cancel the job if waiting fails
