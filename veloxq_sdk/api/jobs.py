@@ -21,6 +21,7 @@ associated metadata.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import typing as t
 from contextlib import closing
@@ -38,9 +39,15 @@ from dateutil.parser import isoparse
 from dimod.sampleset import SampleSet
 from dimod.vartypes import as_vartype
 from pydantic import BeforeValidator, Field
+from websockets.exceptions import ConnectionClosed, InvalidMessage
 
 from veloxq_sdk.api.core.base import BaseModel, BasePydanticModel, build_adapters
 from veloxq_sdk.api.problems import File
+
+_logger = logging.getLogger(__name__)
+
+_RECONNECT_INITIAL_DELAY = 1.0
+_RECONNECT_MAX_DELAY = 30.0
 
 
 class LogCategory(Enum):
@@ -336,6 +343,9 @@ class Job(BaseModel):
     def get_job_updates(self, timeout: float | None = None) -> t.Generator[JobUpdate, None, None]:
         """Get real-time updates for the job.
 
+        A dropped status connection is reopened. The server sends the current
+        status on every new connection, so no update is lost.
+
         Args:
             timeout (float | None): Maximum time in seconds to wait for the job
                 to finish. If None, wait indefinitely.
@@ -359,6 +369,9 @@ class Job(BaseModel):
 
     def wait_for_completion(self, timeout: float | None = None, *, refresh: bool = False) -> None:
         """Wait for the job to complete.
+
+        A dropped status connection is reopened. The server sends the current
+        status on every new connection, so no update is lost.
 
         Args:
             timeout (float | None): Maximum time in seconds to wait for completion.
@@ -396,25 +409,41 @@ class Job(BaseModel):
         self,
         timeout: float | None,
     ) -> t.Generator[bytes, None, None]:
-        """Yield raw status-update messages until `timeout` expires."""
+        """Yield raw status-update messages, reopening the socket when it drops."""
         deadline = None if timeout is None else time.monotonic() + timeout
-        with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
-            while True:
-                remaining = None
+        delay = _RECONNECT_INITIAL_DELAY
+        while True:
+            try:
+                with self.http.open_ws(f'jobs/{self.id}/status-updates') as ws:
+                    while True:
+                        remaining = None
+                        if deadline is not None:
+                            remaining = deadline - time.monotonic()
+                        if remaining is not None and remaining <= 0:
+                            break
+                        try:
+                            message = ws.recv(remaining, decode=False)
+                        except TimeoutError:
+                            break
+                        delay = _RECONNECT_INITIAL_DELAY
+                        yield message
+            except (ConnectionClosed, InvalidMessage, OSError) as err:
+                wait = delay
                 if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
-                    break
-                try:
-                    message = ws.recv(remaining, decode=False)
-                except TimeoutError:
-                    break
-                yield message
-        msg = (
-            f'Waiting for Job {self.id} completion timed '
-            f'out after {timeout} seconds.'
-        )
-        raise TimeoutError(msg)
+                    wait = min(wait, max(deadline - time.monotonic(), 0))
+                _logger.warning(
+                    'Status connection for Job %s failed (%s). Reconnecting in %.1f s.',
+                    self.id, err, wait,
+                )
+                time.sleep(wait)
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY)
+                if deadline is None or time.monotonic() < deadline:
+                    continue
+            msg = (
+                f'Waiting for Job {self.id} completion timed '
+                f'out after {timeout} seconds.'
+            )
+            raise TimeoutError(msg)
 
     def get_job_logs(
         self,

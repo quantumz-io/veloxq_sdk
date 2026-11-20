@@ -21,7 +21,12 @@ import dimod
 import h5py
 import numpy as np
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.frames import Close
+from websockets.http11 import Response
 
+from veloxq_sdk.api import jobs as jobs_module
 from veloxq_sdk.api.jobs import (
     Job,
     JobLogsRow,
@@ -268,6 +273,103 @@ class TestStatusStream:
         next(updates)
         updates.close()
         assert closed == ['jobs/j1/status-updates']
+
+
+def ping_timeout() -> ConnectionClosedError:
+    return ConnectionClosedError(
+        rcvd=None, sent=Close(1011, 'keepalive ping timeout'), rcvd_then_sent=None,
+    )
+
+
+def handshake_rejected(status: int) -> InvalidStatus:
+    return InvalidStatus(Response(status, 'rejected', Headers(), b''))
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record reconnect delays instead of sleeping."""
+    delays = []
+    monkeypatch.setattr(jobs_module.time, 'sleep', delays.append)
+    return delays
+
+
+class TestStatusReconnect:
+    def test_wait_reconnects_after_ping_timeout(self, api_config, ws_factory, sleeps, caplog):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        with caplog.at_level('WARNING', logger='veloxq_sdk.api.jobs'):
+            job.wait_for_completion()
+        assert job.status == 'completed'
+        assert paths == ['jobs/j1/status-updates'] * 2
+        assert sleeps == [1.0]
+        assert 'keepalive ping timeout' in caplog.text
+
+    def test_wait_retries_unreachable_server_with_backoff(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            OSError('Network is unreachable'),
+            TimeoutError('timed out during opening handshake'),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        job.wait_for_completion()
+        assert job.status == 'completed'
+        assert len(paths) == 3
+        assert sleeps == [1.0, 2.0]
+
+    def test_backoff_resets_after_a_message(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        ws_factory(
+            OSError('down'),
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        make_job().wait_for_completion()
+        assert sleeps == [1.0, 1.0]
+
+    @pytest.mark.parametrize('status', [401, 403, 404])
+    def test_rejected_handshake_is_not_retried(self, api_config, ws_factory, sleeps, status):
+        rejection = handshake_rejected(status)
+        paths = ws_factory(rejection)
+        with pytest.raises(InvalidStatus) as info:
+            make_job().wait_for_completion()
+        assert info.value is rejection
+        assert len(paths) == 1
+        assert sleeps == []
+
+    def test_timeout_bounds_reconnect_wait(self, api_config, ws_factory, monkeypatch):
+        clock = [0.0]
+        monkeypatch.setattr(jobs_module.time, 'monotonic', lambda: clock[0])
+        delays = []
+
+        def sleep(seconds):
+            delays.append(seconds)
+            clock[0] += seconds
+
+        monkeypatch.setattr(jobs_module.time, 'sleep', sleep)
+        ws_factory(*(OSError('down') for _ in range(10)))
+        with pytest.raises(TimeoutError, match='timed out after 2.5 seconds'):
+            make_job().wait_for_completion(timeout=2.5)
+        assert delays == [1.0, 1.5]
+
+    def test_updates_continue_across_reconnect(self, api_config, ws_factory, sleeps):
+        from conftest import FakeWS
+
+        ws_factory(
+            FakeWS([json.dumps(update_json(finished=False)).encode(), ping_timeout()]),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        updates = list(job.get_job_updates())
+        assert [u.finished for u in updates] == [False, True]
+        assert job.status == 'completed'
 
 
 class TestJobEndpoints:
