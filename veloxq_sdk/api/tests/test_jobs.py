@@ -392,6 +392,20 @@ class TestStatusReconnect:
         assert [u.finished for u in updates] == [False, True]
         assert job.status == 'completed'
 
+    @pytest.mark.parametrize('status', [429, 500, 503])
+    def test_server_side_rejection_is_retried(self, api_config, ws_factory, sleeps, status):
+        from conftest import FakeWS
+
+        paths = ws_factory(
+            handshake_rejected(status),
+            FakeWS([json.dumps(update_json(finished=True, status='completed')).encode()]),
+        )
+        job = make_job()
+        job.wait_for_completion()
+        assert job.status == 'completed'
+        assert len(paths) == 2
+        assert sleeps == [1.0]
+
 
 class TestJobEndpoints:
     def test_get_job_logs_params_and_parsing(self, mock_api):
