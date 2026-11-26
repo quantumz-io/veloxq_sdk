@@ -126,6 +126,46 @@ class TestSubmit:
         assert body['problemId'] is None
 
 
+def _submitted_parameters(mock_api, solver):
+    mock_api.add('POST', '/jobs', json=[job_json()])
+    solver.submit(File.model_validate(file_json()))
+    body = json.loads(mock_api.calls('POST', '/jobs')[0].content)
+    return body['solvers'][0]['parameters']
+
+
+class TestTimeout:
+    @pytest.mark.parametrize(
+        ('solver_cls', 'params_cls'),
+        [(VeloxQSolver, VeloxQParameters), (SBMSolver, SBMParameters)],
+    )
+    def test_reaches_job_body(self, mock_api, solver_cls, params_cls):
+        solver = solver_cls(parameters=params_cls(num_rep=10, timeout=30))
+        parameters = _submitted_parameters(mock_api, solver)
+        assert parameters['num_rep'] == 10
+        assert parameters['timeout'] == 30
+
+    def test_set_after_construction(self, mock_api):
+        solver = VeloxQSolver()
+        solver.parameters.timeout = 30
+        assert _submitted_parameters(mock_api, solver)['timeout'] == 30
+
+    def test_omitted_when_unset(self, mock_api):
+        assert 'timeout' not in _submitted_parameters(mock_api, VeloxQSolver())
+
+    def test_hidden_from_repr(self):
+        assert 'timeout' not in repr(VeloxQParameters(timeout=30))
+
+    @pytest.mark.parametrize('value', [0, -5, 'abc', 1.5])
+    def test_invalid_value_raises(self, value):
+        with pytest.raises(ValidationError, match='timeout'):
+            VeloxQParameters(timeout=value)
+
+    def test_invalid_assignment_raises(self):
+        parameters = VeloxQParameters()
+        with pytest.raises(ValidationError, match='timeout'):
+            parameters.timeout = 'abc'
+
+
 def test_unknown_parameter_raises():
     with pytest.raises(ValidationError, match='num_step'):
         VeloxQParameters(num_step=10)

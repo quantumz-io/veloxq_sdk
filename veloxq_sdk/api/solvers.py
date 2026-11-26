@@ -231,6 +231,7 @@ class BaseSolver(BaseModel):
                 'files': [{'fileId': file.id}],
                 'parameters': self.parameters.model_dump(
                     mode='json',
+                    exclude_none=True,
                 ),
             }],
         }
@@ -242,13 +243,11 @@ class VeloxQParameters(PydanticBaseModel):
     """Parameters for the VeloxQ solver.
 
     This model defines the configuration parameters used by the VeloxQ solver. These
-    include the number of repetitions, the number of steps, and a timeout for solver
-    execution.
+    include the number of repetitions and the number of steps.
 
     Attributes:
         num_rep (int): The number of repetitions to be executed.
         num_steps (int): The number of steps to be executed.
-        timeout (int): The solver's timeout in seconds.
 
     Unknown parameter names raise ``ValidationError``, and assignments are
     validated.
@@ -265,6 +264,7 @@ class VeloxQParameters(PydanticBaseModel):
         default=5000,
         description='The number of steps to be executed.',
     )
+    timeout: t.Optional[int] = Field(default=None, gt=0, repr=False)
 
 
 class VeloxQSolver(BaseSolver):
@@ -296,8 +296,8 @@ class SBMParameters(VeloxQParameters):
     """Parameters for the SBM solver.
 
     This model defines the configuration parameters used by the SBM solver.
-    These include the number of repetitions, the number of steps, and a timeout for
-    solver execution, as well as additional parameters specific to the SBM algorithm.
+    These include the number of repetitions and the number of steps, as well as
+    additional parameters specific to the SBM algorithm.
 
     Attributes:
         num_rep (int): The number of repetitions to be executed.
