@@ -16,6 +16,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from veloxq_sdk.api.backends import VeloxQH100_1, VeloxQH100_2
 from veloxq_sdk.api.problems import File
@@ -123,6 +124,11 @@ class TestSubmit:
         VeloxQSolver().submit(File.model_validate(file_json()))
         body = json.loads(mock_api.calls('POST', '/jobs')[0].content)
         assert body['problemId'] is None
+
+
+def test_unknown_parameter_raises():
+    with pytest.raises(ValidationError, match='num_step'):
+        VeloxQParameters(num_step=10)
 
 
 class TestDefaults:

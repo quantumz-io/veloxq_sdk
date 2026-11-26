@@ -23,7 +23,7 @@ from __future__ import annotations
 import typing as t
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from dimod.sampleset import SampleSet
 
@@ -250,7 +250,12 @@ class VeloxQParameters(PydanticBaseModel):
         num_steps (int): The number of steps to be executed.
         timeout (int): The solver's timeout in seconds.
 
+    Unknown parameter names raise ``ValidationError``, and assignments are
+    validated.
+
     """
+
+    model_config = ConfigDict(extra='forbid', validate_assignment=True)
 
     num_rep: int = Field(
         default=4096,
